@@ -31,7 +31,7 @@ type RaftStorage struct {
 	node          *raftstore.Node
 	snapManager   *snap.SnapManager
 	raftRouter    *raftstore.RaftstoreRouter
-	batchSystem   *raftstore.RaftBatchSystem
+	raftSystem    *raftstore.Raftstore
 	resolveWorker *worker.Worker
 	snapWorker    *worker.Worker
 
@@ -68,8 +68,8 @@ func NewRaftStorage(conf *config.Config) *RaftStorage {
 	os.MkdirAll(raftPath, os.ModePerm)
 	os.Mkdir(snapPath, os.ModePerm)
 
-	raftDB := engine_util.CreateDB("raft", conf)
-	kvDB := engine_util.CreateDB("kv", conf)
+	raftDB := engine_util.CreateDB(raftPath, true)
+	kvDB := engine_util.CreateDB(kvPath, false)
 	engines := engine_util.NewEngines(kvDB, raftDB, kvPath, raftPath)
 
 	return &RaftStorage{engines: engines, config: conf}
@@ -146,9 +146,6 @@ func (rs *RaftStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, erro
 	if cb.Txn == nil {
 		panic("can not found region snap")
 	}
-	if len(resp.Responses) != 1 {
-		panic("wrong response count for snap cmd")
-	}
 	return NewRegionReader(cb.Txn, *resp.Responses[0].GetSnap().Region), nil
 }
 
@@ -182,14 +179,14 @@ func (rs *RaftStorage) Start() error {
 	if err != nil {
 		return err
 	}
-	rs.raftRouter, rs.batchSystem = raftstore.CreateRaftBatchSystem(cfg)
+	rs.raftRouter, rs.raftSystem = raftstore.CreateRaftstore(cfg)
 
 	rs.resolveWorker = worker.NewWorker("resolver", &rs.wg)
 	resolveSender := rs.resolveWorker.Sender()
 	resolveRunner := newResolverRunner(schedulerClient)
 	rs.resolveWorker.Start(resolveRunner)
 
-	rs.snapManager = snap.NewSnapManager(cfg.DBPath + "snap")
+	rs.snapManager = snap.NewSnapManager(filepath.Join(cfg.DBPath, "snap"))
 	rs.snapWorker = worker.NewWorker("snap-worker", &rs.wg)
 	snapSender := rs.snapWorker.Sender()
 	snapRunner := newSnapRunner(rs.snapManager, rs.config, rs.raftRouter)
@@ -198,7 +195,7 @@ func (rs *RaftStorage) Start() error {
 	raftClient := newRaftClient(cfg)
 	trans := NewServerTransport(raftClient, snapSender, rs.raftRouter, resolveSender)
 
-	rs.node = raftstore.NewNode(rs.batchSystem, rs.config, schedulerClient)
+	rs.node = raftstore.NewNode(rs.raftSystem, rs.config, schedulerClient)
 	err = rs.node.Start(context.TODO(), rs.engines, trans, rs.snapManager)
 	if err != nil {
 		return err

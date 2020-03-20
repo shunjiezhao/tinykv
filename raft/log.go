@@ -18,9 +18,9 @@ import pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 
 // RaftLog manage the log entries, its struct look like:
 //
-//  truncated.....first.....applied....committed....stabled.....last
-//  --------|     |------------------------------------------------|
-//                                  log entries
+//  snapshot/first.....applied....committed....stabled.....last
+//  --------|------------------------------------------------|
+//                            log entries
 //
 // for simplify the RaftLog implement should manage all log entries
 // that not truncated
@@ -37,7 +37,9 @@ type RaftLog struct {
 	// Invariant: applied <= committed
 	applied uint64
 
-	// log entries with index <= stabled are stabled to storage
+	// log entries with index <= stabled are persisted to storage.
+	// It is used to record the logs that are not persisted by storage yet.
+	// Everytime handling `Ready`, the unstabled logs will be included.
 	stabled uint64
 
 	// all entries that have not yet compact.
@@ -64,6 +66,14 @@ func (l *RaftLog) maybeCompact() {
 	// Your Code Here (2C).
 }
 
+// allEntries return all the entries not compacted.
+// note, exclude any dummy entries from the return value.
+// note, this is one of the test stub functions you need to implement.
+func (l *RaftLog) allEntries() []pb.Entry {
+	// Your Code Here (2A).
+	return nil
+}
+
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
@@ -76,7 +86,7 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	return nil
 }
 
-// LastIndex return the last index of the lon entries
+// LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
 	return 0

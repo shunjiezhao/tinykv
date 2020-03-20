@@ -3,7 +3,6 @@ package test_raftstore
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/google/btree"
@@ -225,6 +224,11 @@ func (m *MockSchedulerClient) AskSplit(ctx context.Context, region *metapb.Regio
 	if err != nil {
 		return resp, err
 	}
+
+	if curRegion == nil || curRegion.GetId() != region.GetId() {
+		return resp, errors.New("region not found")
+	}
+
 	if util.IsEpochStale(region.RegionEpoch, curRegion.RegionEpoch) {
 		return resp, errors.New("epoch is stale")
 	}
@@ -350,7 +354,6 @@ func (m *MockSchedulerClient) handleHeartbeatConfVersion(region *metapb.Region) 
 			if searchRegionPeerLen-regionPeerLen != 1 {
 				panic("should only one conf change")
 			}
-			fmt.Println(searchRegion, region)
 			if len(GetDiffPeers(searchRegion, region)) != 1 {
 				panic("should only one different peer")
 			}
@@ -390,22 +393,22 @@ func (m *MockSchedulerClient) handleHeartbeatConfVersion(region *metapb.Region) 
 func (m *MockSchedulerClient) tryFinished(op *Operator, region *metapb.Region, leader *metapb.Peer) bool {
 	switch op.Type {
 	case OperatorTypeAddPeer:
-		add := op.Data.(OpAddPeer)
+		add := op.Data.(*OpAddPeer)
 		if !add.pending {
 			for _, p := range region.GetPeers() {
 				if add.peer.GetId() == p.GetId() {
 					add.pending = true
-				} else {
-					// TinyKV rejects AddNode.
 					return false
 				}
 			}
+			// TinyKV rejects AddNode.
+			return false
 		} else {
 			_, found := m.pendingPeers[add.peer.GetId()]
 			return !found
 		}
 	case OperatorTypeRemovePeer:
-		remove := op.Data.(OpRemovePeer)
+		remove := op.Data.(*OpRemovePeer)
 		for _, p := range region.GetPeers() {
 			if remove.peer.GetId() == p.GetId() {
 				return false
@@ -413,7 +416,7 @@ func (m *MockSchedulerClient) tryFinished(op *Operator, region *metapb.Region, l
 		}
 		return true
 	case OperatorTypeTransferLeader:
-		transfer := op.Data.(OpTransferLeader)
+		transfer := op.Data.(*OpTransferLeader)
 		return leader.GetId() == transfer.peer.GetId()
 	}
 	panic("unreachable")
@@ -422,7 +425,7 @@ func (m *MockSchedulerClient) tryFinished(op *Operator, region *metapb.Region, l
 func (m *MockSchedulerClient) makeRegionHeartbeatResponse(op *Operator, resp *schedulerpb.RegionHeartbeatResponse) {
 	switch op.Type {
 	case OperatorTypeAddPeer:
-		add := op.Data.(OpAddPeer)
+		add := op.Data.(*OpAddPeer)
 		if !add.pending {
 			resp.ChangePeer = &schedulerpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddNode,
@@ -430,13 +433,13 @@ func (m *MockSchedulerClient) makeRegionHeartbeatResponse(op *Operator, resp *sc
 			}
 		}
 	case OperatorTypeRemovePeer:
-		remove := op.Data.(OpRemovePeer)
+		remove := op.Data.(*OpRemovePeer)
 		resp.ChangePeer = &schedulerpb.ChangePeer{
 			ChangeType: eraftpb.ConfChangeType_RemoveNode,
 			Peer:       remove.peer,
 		}
 	case OperatorTypeTransferLeader:
-		transfer := op.Data.(OpTransferLeader)
+		transfer := op.Data.(*OpTransferLeader)
 		resp.TransferLeader = &schedulerpb.TransferLeader{
 			Peer: transfer.peer,
 		}
@@ -491,7 +494,7 @@ func (m *MockSchedulerClient) removeRegionLocked(region *metapb.Region) {
 func (m *MockSchedulerClient) AddPeer(regionID uint64, peer *metapb.Peer) {
 	m.scheduleOperator(regionID, &Operator{
 		Type: OperatorTypeAddPeer,
-		Data: OpAddPeer{
+		Data: &OpAddPeer{
 			peer:    peer,
 			pending: false,
 		},
@@ -501,7 +504,7 @@ func (m *MockSchedulerClient) AddPeer(regionID uint64, peer *metapb.Peer) {
 func (m *MockSchedulerClient) RemovePeer(regionID uint64, peer *metapb.Peer) {
 	m.scheduleOperator(regionID, &Operator{
 		Type: OperatorTypeRemovePeer,
-		Data: OpRemovePeer{
+		Data: &OpRemovePeer{
 			peer: peer,
 		},
 	})
@@ -510,7 +513,7 @@ func (m *MockSchedulerClient) RemovePeer(regionID uint64, peer *metapb.Peer) {
 func (m *MockSchedulerClient) TransferLeader(regionID uint64, peer *metapb.Peer) {
 	m.scheduleOperator(regionID, &Operator{
 		Type: OperatorTypeTransferLeader,
-		Data: OpTransferLeader{
+		Data: &OpTransferLeader{
 			peer: peer,
 		},
 	})

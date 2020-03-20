@@ -343,8 +343,13 @@ func (p *peer) Term() uint64 {
 }
 
 func (p *peer) HeartbeatScheduler(ch chan<- worker.Task) {
+	clonedRegion := new(metapb.Region)
+	err := util.CloneMsg(p.Region(), clonedRegion)
+	if err != nil {
+		return
+	}
 	ch <- &runner.SchedulerRegionHeartbeatTask{
-		Region:          p.Region(),
+		Region:          clonedRegion,
 		Peer:            p.Meta,
 		PendingPeers:    p.CollectPendingPeers(),
 		ApproximateSize: p.ApproximateSize,
@@ -365,7 +370,7 @@ func (p *peer) sendRaftMessage(msg eraftpb.Message, trans Transport) error {
 	if toPeer == nil {
 		return fmt.Errorf("failed to lookup recipient peer %v in region %v", msg.To, p.regionId)
 	}
-	log.Debugf("%v, send raft msg %v from %v to %v", p.Tag, msg.MsgType, fromPeer.Id, toPeer.Id)
+	log.Debugf("%v, send raft msg %v from %v to %v", p.Tag, msg.MsgType, fromPeer, toPeer)
 
 	sendMsg.FromPeer = &fromPeer
 	sendMsg.ToPeer = toPeer

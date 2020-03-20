@@ -14,10 +14,9 @@
 
 /*
 This file contains tests which verify that the scenarios described
-in the raft paper (https://ramcloud.stanford.edu/raft.pdf) are
-handled by the raft implementation correctly. Each test focuses on
-several sentences written in the paper. This could help us to prevent
-most implementation bugs.
+in the raft paper (https://raft.github.io/raft.pdf) are handled by the
+raft implementation correctly. Each test focuses on several sentences
+written in the paper.
 
 Each test is composed of three parts: init, test and check.
 Init part uses simple and understandable way to simulate the init state.
@@ -181,11 +180,6 @@ func TestLeaderElectionInOneRoundRPC2AA(t *testing.T) {
 		{5, map[uint64]bool{2: true, 3: true, 4: true, 5: true}, StateLeader},
 		{5, map[uint64]bool{2: true, 3: true, 4: true}, StateLeader},
 		{5, map[uint64]bool{2: true, 3: true}, StateLeader},
-
-		// return to follower state if it receives vote denial from a majority
-		{3, map[uint64]bool{2: false, 3: false}, StateFollower},
-		{5, map[uint64]bool{2: false, 3: false, 4: false, 5: false}, StateFollower},
-		{5, map[uint64]bool{2: true, 3: false, 4: false, 5: false}, StateFollower},
 
 		// stay in candidate if it does not obtain the majority
 		{3, map[uint64]bool{}, StateCandidate},
@@ -610,7 +604,7 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 			t.Errorf("#%d: term = %+v, want %+v", i, msgs[0].Term, 2)
 		}
 		if msgs[0].Reject != tt.wreject {
-			t.Errorf("#%d: term = %+v, want %+v", i, msgs[0].Reject, tt.wreject)
+			t.Errorf("#%d: reject = %+v, want %+v", i, msgs[0].Reject, tt.wreject)
 		}
 	}
 }
@@ -623,30 +617,31 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 func TestFollowerAppendEntries2AB(t *testing.T) {
 	tests := []struct {
 		index, term uint64
+		lterm       uint64
 		ents        []*pb.Entry
 		wents       []*pb.Entry
 		wunstable   []*pb.Entry
 	}{
 		{
-			2, 2,
+			2, 2, 3,
 			[]*pb.Entry{{Term: 3, Index: 3}},
 			[]*pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}, {Term: 3, Index: 3}},
 			[]*pb.Entry{{Term: 3, Index: 3}},
 		},
 		{
-			1, 1,
+			1, 1, 4,
 			[]*pb.Entry{{Term: 3, Index: 2}, {Term: 4, Index: 3}},
 			[]*pb.Entry{{Term: 1, Index: 1}, {Term: 3, Index: 2}, {Term: 4, Index: 3}},
 			[]*pb.Entry{{Term: 3, Index: 2}, {Term: 4, Index: 3}},
 		},
 		{
-			0, 0,
+			0, 0, 2,
 			[]*pb.Entry{{Term: 1, Index: 1}},
 			[]*pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}},
 			[]*pb.Entry{},
 		},
 		{
-			0, 0,
+			0, 0, 3,
 			[]*pb.Entry{{Term: 3, Index: 1}},
 			[]*pb.Entry{{Term: 3, Index: 1}},
 			[]*pb.Entry{{Term: 3, Index: 1}},
@@ -658,13 +653,13 @@ func TestFollowerAppendEntries2AB(t *testing.T) {
 		r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, storage)
 		r.becomeFollower(2, 2)
 
-		r.Step(pb.Message{From: 2, To: 1, MsgType: pb.MessageType_MsgAppend, Term: 2, LogTerm: tt.term, Index: tt.index, Entries: tt.ents})
+		r.Step(pb.Message{From: 2, To: 1, MsgType: pb.MessageType_MsgAppend, Term: tt.lterm, LogTerm: tt.term, Index: tt.index, Entries: tt.ents})
 
 		wents := make([]pb.Entry, 0, len(tt.wents))
 		for _, ent := range tt.wents {
 			wents = append(wents, *ent)
 		}
-		if g := r.RaftLog.entries; !reflect.DeepEqual(g, wents) {
+		if g := r.RaftLog.allEntries(); !reflect.DeepEqual(g, wents) {
 			t.Errorf("#%d: ents = %+v, want %+v", i, g, wents)
 		}
 		var wunstable []pb.Entry
@@ -748,7 +743,7 @@ func TestLeaderSyncFollowerLog2AB(t *testing.T) {
 		n := newNetwork(lead, follower, nopStepper)
 		n.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 		// The election occurs in the term after the one we loaded with
-		// lead's term and commited index setted up above.
+		// lead's term and committed index setted up above.
 		n.send(pb.Message{From: 3, To: 1, MsgType: pb.MessageType_MsgRequestVoteResponse, Term: term + 1})
 
 		n.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
@@ -810,7 +805,7 @@ func TestVoteRequest2AB(t *testing.T) {
 // TestVoter tests the voter denies its vote if its own log is more up-to-date
 // than that of the candidate.
 // Reference: section 5.4.1
-func TestVoter2AA(t *testing.T) {
+func TestVoter2AB(t *testing.T) {
 	tests := []struct {
 		ents    []pb.Entry
 		logterm uint64
@@ -922,6 +917,7 @@ func acceptAndReply(m pb.Message) pb.Message {
 	if m.MsgType != pb.MessageType_MsgAppend {
 		panic("type should be MessageType_MsgAppend")
 	}
+	// Note: reply message don't contain LogTerm
 	return pb.Message{
 		From:    m.To,
 		To:      m.From,

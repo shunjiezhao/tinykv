@@ -22,11 +22,11 @@ type Node struct {
 	clusterID       uint64
 	store           *metapb.Store
 	cfg             *config.Config
-	system          *RaftBatchSystem
+	system          *Raftstore
 	schedulerClient scheduler_client.Client
 }
 
-func NewNode(system *RaftBatchSystem, cfg *config.Config, schedulerClient scheduler_client.Client) *Node {
+func NewNode(system *Raftstore, cfg *config.Config, schedulerClient scheduler_client.Client) *Node {
 	return &Node{
 		clusterID: schedulerClient.GetClusterID((context.TODO())),
 		store: &metapb.Store{
@@ -205,4 +205,8 @@ func (n *Node) Stop() {
 
 func (n *Node) GetStoreID() uint64 {
 	return n.store.GetId()
+}
+
+func (n *Node) GetDBPath() string {
+	return n.cfg.DBPath
 }

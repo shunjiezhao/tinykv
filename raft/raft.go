@@ -131,16 +131,22 @@ type Raft struct {
 	// the leader id
 	Lead uint64
 
-	// heartbeat interval
+	// heartbeat interval, should send
 	heartbeatTimeout int
 	// baseline of election interval
 	electionTimeout int
-	// randomizedElectionTimeout is a random number between
-	// [electiontimeout, 2 * electiontimeout - 1].
-	randomizedElectionTimeout int
+	// number of ticks since it reached last heartbeatTimeout.
+	// only leader keeps heartbeatElapsed.
+	heartbeatElapsed int
+	// Ticks since it reached last electionTimeout when it is leader or candidate.
+	// Number of ticks since it reached last electionTimeout or received a
+	// valid message from current leader when it is a follower.
+	electionElapsed int
 
 	// leadTransferee is id of the leader transfer target when its value is not zero.
-	// Follow the procedure defined in raft thesis 3.10.
+	// Follow the procedure defined in section 3.10 of Raft phd thesis.
+	// (https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf)
+	// (Used in 3A leader transfer)
 	leadTransferee uint64
 
 	// Only one conf change may be pending (in the log, but not yet
@@ -149,14 +155,8 @@ type Raft struct {
 	// configuration change (if any). Config changes are only allowed to
 	// be proposed if the leader's applied index is greater than this
 	// value.
+	// (Used in 3A conf change)
 	PendingConfIndex uint64
-
-	// number of ticks since it reached last electionTimeout
-	electionElapsed int
-
-	// number of ticks since it reached last heartbeatTimeout.
-	// only leader keeps heartbeatElapsed.
-	heartbeatElapsed int
 }
 
 // newRaft return a raft peer with the given config
@@ -198,6 +198,7 @@ func (r *Raft) becomeCandidate() {
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
+	// NOTE: Leader should propose a noop entry on its term
 }
 
 // Step the entrance of handle message, see `MessageType`

@@ -11,7 +11,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/proto/pkg/metapb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/raft_cmdpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/schedulerpb"
-	"github.com/shirou/gopsutil/disk"
+	"github.com/shirou/gopsutil/v3/disk"
 )
 
 type SchedulerAskSplitTask struct {
@@ -57,7 +57,7 @@ func (r *SchedulerTaskHandler) Handle(t worker.Task) {
 	case *SchedulerStoreHeartbeatTask:
 		r.onStoreHeartbeat(t.(*SchedulerStoreHeartbeatTask))
 	default:
-		log.Error("unsupported worker.Task: %+v", t)
+		log.Errorf("unsupported worker.Task: %+v", t)
 	}
 }
 

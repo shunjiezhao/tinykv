@@ -19,9 +19,9 @@ import (
 )
 
 // There're some tasks for region worker, such as:
-// `TaskTypeRegionGen` which will cause the worker to generate a snapshot according to RegionId,
-// `TaskTypeRegionApply` which will apply a snapshot to the region that id equals RegionId,
-// `TaskTypeRegionDestroy` which will clean up the key range from StartKey to EndKey.
+// `RegionTaskGen` which will cause the worker to generate a snapshot according to RegionId,
+// `RegionTaskApply` which will apply a snapshot to the region that id equals RegionId,
+// `RegionTaskDestroy` which will clean up the key range from StartKey to EndKey.
 
 type RegionTaskGen struct {
 	RegionId uint64                   // specify the region which the task is for.
@@ -82,6 +82,7 @@ func (snapCtx *snapContext) handleGen(regionId uint64, notifier chan<- *eraftpb.
 	snap, err := doSnapshot(snapCtx.engines, snapCtx.mgr, regionId)
 	if err != nil {
 		log.Errorf("failed to generate snapshot!!!, [regionId: %d, err : %v]", regionId, err)
+		notifier <- nil
 	} else {
 		notifier <- snap
 	}
