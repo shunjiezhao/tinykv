@@ -127,3 +127,36 @@ func IsResponseMsg(msgt pb.MessageType) bool {
 func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
+
+func MessageStr(r *Raft, m pb.Message) string {
+	switch m.MsgType {
+	case pb.MessageType_MsgHup:
+		return fmt.Sprintf("[HUP] send")
+	case pb.MessageType_MsgBeat:
+		return fmt.Sprintf("[HeartBeat] send")
+	case pb.MessageType_MsgPropose:
+	case pb.MessageType_MsgRequestVote:
+		return fmt.Sprintf("[RequestVote] Commit: %v to %v", r.RaftLog.committed, m.To)
+	case pb.MessageType_MsgRequestVoteResponse:
+		return fmt.Sprintf("[RequestVoteResponse]  Commit: %v to %v Reject: %v", r.RaftLog.committed, m.To, m.Reject)
+	case pb.MessageType_MsgHeartbeat:
+		return fmt.Sprintf("[HeartBeat] Commit: %v to %v", r.RaftLog.committed, m.To)
+	case pb.MessageType_MsgHeartbeatResponse:
+		return fmt.Sprintf("[HeartBeatResponse] Commit: %v to %v", r.RaftLog.committed, m.To)
+	}
+	return ""
+}
+
+// voteResponseType maps vote and prevote message types to their corresponding responses.
+func voteRespMsgType(msgt pb.MessageType) pb.MessageType {
+	switch msgt {
+	case pb.MessageType_MsgRequestVote:
+		return pb.MessageType_MsgRequestVoteResponse
+	default:
+		panic(fmt.Sprintf("not a vote message: %s", msgt))
+	}
+}
+
+func (r *Raft) info() string {
+	return fmt.Sprintf("%x:%s:%d ", r.id, r.State, r.Term)
+}

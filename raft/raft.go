@@ -16,6 +16,9 @@ package raft
 
 import (
 	"errors"
+	"github.com/pingcap-incubator/tinykv/log"
+	"math/rand"
+	"time"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -106,9 +109,11 @@ func (c *Config) validate() error {
 type Progress struct {
 	Match, Next uint64
 }
-
+type stepFunc func(r *Raft, m pb.Message) error
 type Raft struct {
-	id uint64
+	id    uint64
+	peers []uint64
+	step  stepFunc
 
 	Term uint64
 	Vote uint64
@@ -159,13 +164,37 @@ type Raft struct {
 	PendingConfIndex uint64
 }
 
+var rd = rand.NewSource(time.Now().Unix())
+
+func randN(n int) int {
+	return int(rd.Int63()) % n
+}
+
 // newRaft return a raft peer with the given config
 func newRaft(c *Config) *Raft {
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
+
 	// Your Code Here (2A).
-	return nil
+	raft := &Raft{
+		id:               c.ID,
+		peers:            c.peers,
+		RaftLog:          newLog(c.Storage),
+		Prs:              map[uint64]*Progress{},
+		State:            StateFollower,
+		votes:            map[uint64]bool{},
+		msgs:             []pb.Message{},
+		heartbeatTimeout: c.HeartbeatTick,
+		electionTimeout:  c.ElectionTick + randN(c.ElectionTick), // [el, 2*el-1]
+	}
+	for _, peer := range c.peers {
+		raft.Prs[peer] = &Progress{}
+	}
+	log.Debugf("New Raft Config %+v", c)
+	raft.becomeFollower(raft.Term, None)
+	//log.Debugf("New Raft %+v\n", raft)
+	return raft
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
@@ -177,40 +206,190 @@ func (r *Raft) sendAppend(to uint64) bool {
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
 func (r *Raft) sendHeartbeat(to uint64) {
+	if to == r.id {
+		log.Panicf("send your self ?")
+	}
 	// Your Code Here (2A).
+	commit := min(r.Prs[to].Match, r.RaftLog.committed) // 匹配, 自己
+	msg := pb.Message{
+		MsgType: pb.MessageType_MsgHeartbeat,
+		To:      to,
+		From:    r.id,
+		Term:    r.Term,
+		Commit:  commit,
+	}
+	r.send(msg)
+	log.Debugf("append msg %s", MessageStr(r, msg))
+}
+
+func (r *Raft) Visit(f func(idx int, to uint64), sendMe bool) {
+	ids := nodes(r)
+	for idx, to := range ids {
+		if r.id == to && sendMe == false {
+			continue
+		}
+		f(idx, to)
+	}
+
 }
 
 // tick advances the internal logical clock by a single tick.
 func (r *Raft) tick() {
+	r.heartbeatElapsed++
+	r.electionElapsed++
 	// Your Code Here (2A).
+	if r.State == StateLeader {
+		// 发送心跳
+		if r.heartbeatElapsed >= r.heartbeatTimeout {
+			r.step(r, pb.Message{MsgType: pb.MessageType_MsgBeat})
+		}
+		return
+	}
+
+	// follow , candidate
+	if r.electionElapsed >= r.electionTimeout {
+		r.becomeCandidate()
+	}
 }
 
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
+	// 1. 任期
+	r.Term = term
+	// 2. 投票
+	r.Vote = None
+	// 3. leadId
+	r.Lead = lead
+	r.electionElapsed = 0   // 清空选举超时
+	r.State = StateFollower // 状态改变
+	r.step = stepFollower
+	if r.Term != 0 {
+		log.Infof("%s became %s at term %d", r.info(), r.State, r.Term)
+	}
 }
 
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
+	r.State = StateCandidate
+	r.step = stepCandidate
+	r.Term++
+	r.Vote = r.id
+	r.votes = map[uint64]bool{} // RESET
+	log.Infof("%s became candidate at term %d", r.info(), r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
+	if r.Vote == None || r.State != StateCandidate {
+		log.Panicf("vote:%v state:%s", r.Vote, r.State)
+	}
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
+	// 0. state -> Leader
+	r.State = StateLeader
+	r.step = stepLeader
+	// 1. election -> 0
+	r.electionElapsed = 0
+	// 2. 更新 nextIndex,matchIndex
+	for _, progress := range r.Prs {
+		progress.Next = r.RaftLog.LastIndex() + 1
+	}
+	// 3. lead = me
+	r.Lead = r.id
+	// 4.todo:append Empty Log
+	log.Infof("%s became %s at term %d", r.info(), r.State, r.Term)
+
+}
+
+func stepFollower(r *Raft, m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgBeat:
+		r.handleHeartbeat(m)
+	case pb.MessageType_MsgHup:
+		r.becomeCandidate()
+		r.hup()
+	case pb.MessageType_MsgRequestVoteResponse:
+	case pb.MessageType_MsgRequestVote:
+		r.handleVote(m)
+
+	}
+	return nil
+}
+func stepCandidate(r *Raft, m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgBeat:
+		r.handleHeartbeat(m)
+	//case pb.MessageType_MsgHup:
+	case pb.MessageType_MsgRequestVoteResponse:
+		gr, rj, res := r.poll(m.From, m.MsgType, !m.Reject) //Reject = true stand not vote
+		log.Infof("%s has received %s %d votes and %d vote rejections", r.info(), MessageStr(r, m), gr, rj)
+		switch res {
+		case VoteWon:
+			if r.State == StateCandidate {
+				r.becomeLeader()
+				r.bcastAppend()
+			}
+		case VoteLost:
+			// pb.MsgPreVoteResp contains future term of pre-candidate
+			// m.Term > r.Term; reuse r.Term
+			r.becomeFollower(r.Term, None)
+		}
+
+	}
+	return nil
+}
+func stepLeader(r *Raft, m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgHeartbeat:
+		r.Visit(func(idx int, to uint64) {
+			r.sendHeartbeat(to)
+		}, false)
+
+	}
+	return nil
 }
 
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
+	log.Infof("%s receive msg: %s %+v", r.info(), MessageStr(r, m), m)
+	// 判断是否合法
+	if r.Term > m.Term { // 过时的
+		log.Debug("out dated")
+		m.Reject = m.MsgType == pb.MessageType_MsgRequestVote // 如果是投票的话就直接拒绝
+		return nil
+	}
+
 	// Your Code Here (2A).
-	switch r.State {
-	case StateFollower:
-	case StateCandidate:
-	case StateLeader:
+	err := r.step(r, m)
+	if err != nil {
+		log.Errorf("")
 	}
 	return nil
+}
+
+func (r *Raft) hup() {
+	ids := nodes(r)
+	for _, id := range ids {
+		if id == r.id {
+			r.step(r, r.NewResponseVoteMsg(r.id, false))
+			continue
+		}
+		r.send(r.NewRequestVoteMsg(id))
+	}
+
+}
+func (r *Raft) send(m pb.Message) {
+	if m.Term == None {
+		m.Term = r.Term
+	}
+	if m.From == None {
+		m.From = r.id
+	}
+
+	r.msgs = append(r.msgs, m)
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -221,6 +400,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 // handleHeartbeat handle Heartbeat RPC request
 func (r *Raft) handleHeartbeat(m pb.Message) {
 	// Your Code Here (2A).
+	r.becomeFollower(m.Term, m.To)
 }
 
 // handleSnapshot handle Snapshot RPC request
@@ -236,4 +416,10 @@ func (r *Raft) addNode(id uint64) {
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
+}
+
+func (r *Raft) bcastAppend() {
+	r.Visit(func(idx int, to uint64) {
+		r.sendAppend(to)
+	}, false)
 }

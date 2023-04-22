@@ -16,8 +16,9 @@ package raft
 
 import (
 	"errors"
-
+	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	"time"
 )
 
 // ErrStepLocalMsg is returned when try to step a local raft message
@@ -69,13 +70,23 @@ type Ready struct {
 // RawNode is a wrapper of Raft.
 type RawNode struct {
 	Raft *Raft
+
 	// Your Data Here (2A).
+	done   chan struct{}
+	ticker *time.Ticker
 }
+
+var TickerInterval = 75 * time.Millisecond
 
 // NewRawNode returns a new RawNode given configuration and a list of raft peers.
 func NewRawNode(config *Config) (*RawNode, error) {
 	// Your Code Here (2A).
-	return nil, nil
+	node := &RawNode{}
+	node.Raft = newRaft(config)
+	node.ticker = time.NewTicker(TickerInterval)
+
+	go node.Run()
+	return node, nil
 }
 
 // Tick advances the internal logical clock by a single tick.
@@ -173,4 +184,34 @@ func (rn *RawNode) GetProgress() map[uint64]Progress {
 // TransferLeader tries to transfer leadership to the given transferee.
 func (rn *RawNode) TransferLeader(transferee uint64) {
 	_ = rn.Raft.Step(pb.Message{MsgType: pb.MessageType_MsgTransferLeader, From: transferee})
+}
+
+func (rn *RawNode) Run() {
+	log.Debug("Run", rn.Raft.id)
+	return
+	for {
+		select {
+		case <-rn.ticker.C:
+			log.Debugf("tick")
+			rn.Tick()
+		//case rd := <-rn.Node.Ready():
+		//	saveToStorage(rd.State, rd.Entries, rd.Snapshot)
+		//	send(rd.Messages)
+		//	if !raft.IsEmptySnap(rd.Snapshot) {
+		//		processSnapshot(rd.Snapshot)
+		//	}
+		//	for _, entry := range rd.CommittedEntries {
+		//		process(entry)
+		//		if entry.Type == eraftpb.EntryType_EntryConfChange {
+		//			var cc eraftpb.ConfChange
+		//			cc.Unmarshal(entry.Data)
+		//			s.Node.ApplyConfChange(cc)
+		//		}
+		//	}
+		//	s.Node.Advance()
+		case <-rn.done:
+			return
+		}
+	}
+
 }
