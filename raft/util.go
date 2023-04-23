@@ -26,6 +26,37 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
+func covEntry2PtrC(es ...pb.Entry) []*pb.Entry {
+	var ans = make([]*pb.Entry, len(es))
+	for i := range es {
+		ans[i] = &pb.Entry{
+			EntryType:            es[i].EntryType,
+			Term:                 es[i].Term,
+			Index:                es[i].Index,
+			Data:                 es[i].Data,
+			XXX_NoUnkeyedLiteral: es[i].XXX_NoUnkeyedLiteral,
+			XXX_unrecognized:     es[i].XXX_unrecognized,
+			XXX_sizecache:        es[i].XXX_sizecache,
+		}
+	}
+	return ans
+}
+func covEntry2StructC(es ...*pb.Entry) []pb.Entry {
+	var ans = make([]pb.Entry, len(es))
+	for i := range es {
+		ans[i] = pb.Entry{
+			EntryType:            es[i].EntryType,
+			Term:                 es[i].Term,
+			Index:                es[i].Index,
+			Data:                 es[i].Data,
+			XXX_NoUnkeyedLiteral: es[i].XXX_NoUnkeyedLiteral,
+			XXX_unrecognized:     es[i].XXX_unrecognized,
+			XXX_sizecache:        es[i].XXX_sizecache,
+		}
+	}
+	return ans
+}
+
 func min(a, b uint64) uint64 {
 	if a > b {
 		return b
@@ -143,20 +174,15 @@ func MessageStr(r *Raft, m pb.Message) string {
 		return fmt.Sprintf("[HeartBeat] Commit: %v to %v", r.RaftLog.committed, m.To)
 	case pb.MessageType_MsgHeartbeatResponse:
 		return fmt.Sprintf("[HeartBeatResponse] Commit: %v to %v", r.RaftLog.committed, m.To)
+	case pb.MessageType_MsgAppend:
+		return fmt.Sprintf("[Appendd] PrevInfo:{%v:%v}", m.Index, m.LogTerm)
+	case pb.MessageType_MsgAppendResponse:
+		return fmt.Sprintf("[AppendRespons] Commit: %v Reject: %v to %v", r.RaftLog.committed, m.Reject, m.To)
+
 	}
 	return ""
 }
 
-// voteResponseType maps vote and prevote message types to their corresponding responses.
-func voteRespMsgType(msgt pb.MessageType) pb.MessageType {
-	switch msgt {
-	case pb.MessageType_MsgRequestVote:
-		return pb.MessageType_MsgRequestVoteResponse
-	default:
-		panic(fmt.Sprintf("not a vote message: %s", msgt))
-	}
-}
-
 func (r *Raft) info() string {
-	return fmt.Sprintf("%x:%s:%d ", r.id, r.State, r.Term)
+	return fmt.Sprintf("{%x:%s:%d} ", r.id, r.State, r.Term)
 }

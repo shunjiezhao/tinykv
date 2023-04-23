@@ -17,6 +17,7 @@ package raft
 import (
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	"github.com/pkg/errors"
 )
 
 // RaftLog manage the log entries, its struct look like:
@@ -99,6 +100,11 @@ func (l *RaftLog) LastIndex() uint64 {
 	return l.LastLog().Index
 }
 
+func (l *RaftLog) NextIndex() uint64 {
+	// Your Code Here (2A).
+	return l.LastLog().Index + 1
+}
+
 // LastTerm return the last Term of the log entries
 func (l *RaftLog) LastTerm() uint64 {
 	// Your Code Here (2A).
@@ -113,4 +119,67 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 func (l *RaftLog) LastLog() pb.Entry {
 	log.Debugf("%+v", l.entries)
 	return l.entries[len(l.entries)-1]
+}
+
+var (
+	LogIsCompacted = errors.New("LogIsCompacted") // stand in snapshot
+	LogNotExist    = errors.New("LogNotExist")    // stand > lastLogIndex
+)
+
+// if not in [First,LastLogIndex] return nil
+func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
+	if index < l.First() && index != 0 { // is compact
+		return nil, LogIsCompacted
+	}
+	if index > l.LastIndex() { // exceed
+		return nil, LogNotExist
+	}
+
+	//[First,Last]
+	return &l.entries[index-l.start], nil
+}
+func (l *RaftLog) append(entries ...pb.Entry) uint64 {
+	l.entries = append(l.entries, entries...)
+	return l.LastIndex()
+}
+
+//[lo,hi]
+func (l *RaftLog) slice(lo, hi uint64) []*pb.Entry {
+	if hi < l.First() {
+		return nil //
+	}
+	lo = max(lo, l.First())
+	hi = max(hi, l.First())
+	hi = min(hi, l.LastIndex())
+
+	lo, hi = lo-l.start, hi-l.start
+	return covEntry2PtrC(l.entries[lo : hi+1]...)
+}
+
+func (l *RaftLog) First() uint64 {
+	return l.start + 1
+}
+
+// use in append log, return log is in [First,LastLogIndex]
+func (l *RaftLog) Contain(index uint64) bool {
+	return l.First() <= index && index <= l.LastIndex()
+}
+
+func (l *RaftLog) IsConflict(index, term uint64) bool {
+	if l.Contain(index) == false { // not contain this log
+		return false
+	}
+	at, _ := l.entryAt(index)
+	return at.Term != term // if term not equal,is conflict should truncate
+}
+
+// truncate index to end(include index)
+func (l *RaftLog) truncate(index uint64) {
+	l.entries = l.entries[:index-l.start]
+}
+func (l *RaftLog) updateCommitIndex(commit uint64) {
+	if commit < l.committed {
+		log.Panicf("check source commit not back up")
+	}
+	l.committed = commit
 }

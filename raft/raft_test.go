@@ -17,6 +17,7 @@ package raft
 import (
 	"bytes"
 	"fmt"
+	"github.com/pingcap-incubator/tinykv/log"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -56,6 +57,7 @@ func (r *Raft) readMessages() []pb.Message {
 }
 
 func TestProgressLeader2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	r := newTestRaft(1, []uint64{1, 2}, 5, 1, NewMemoryStorage())
 	r.becomeCandidate()
 	r.becomeLeader()
@@ -64,7 +66,7 @@ func TestProgressLeader2AB(t *testing.T) {
 	propMsg := pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("foo")}}}
 	for i := 0; i < 5; i++ {
 		if pr := r.Prs[r.id]; pr.Match != uint64(i+1) || pr.Next != pr.Match+1 {
-			t.Errorf("unexpected progress %v", pr)
+			t.Errorf("%v: unexpected progress %+v", i, pr)
 		}
 		if err := r.Step(propMsg); err != nil {
 			t.Fatalf("proposal resulted in error: %v", err)
@@ -102,6 +104,7 @@ func TestLeaderElection2AA(t *testing.T) {
 // and be elected in turn. This ensures that elections work when not
 // starting from a clean slate (as they do in TestLeaderElection)
 func TestLeaderCycle2AA(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	var cfg func(*Config)
 	n := newNetworkWithConfig(cfg, nil, nil, nil)
 	for campaignerID := uint64(1); campaignerID <= 3; campaignerID++ {
@@ -126,6 +129,7 @@ func TestLeaderCycle2AA(t *testing.T) {
 // log entries, and must overwrite higher-term log entries with
 // lower-term ones.
 func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_DEBUG)
 	cfg := func(c *Config) {
 		c.peers = idsBySize(5)
 	}

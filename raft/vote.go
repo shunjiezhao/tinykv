@@ -125,10 +125,13 @@ send:
 func (r *Raft) compareLogIsMeNew(m *pb.Message) bool {
 	lastLog := r.RaftLog.LastLog()
 	if m.LogTerm != lastLog.Term {
+		log.Debugf("%+v", r.RaftLog.entries)
+		log.Debugf("term is not equal, %v %v", m.LogTerm, lastLog.Term)
 		return m.LogTerm < lastLog.Term // from < to ? false : true
 	}
 	// term ==
 	if m.Index < lastLog.Index {
+		log.Debugf("index is not equal")
 		return true
 	}
 	// index from >= to
