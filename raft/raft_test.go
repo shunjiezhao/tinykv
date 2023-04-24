@@ -193,6 +193,7 @@ func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
 }
 
 func TestVoteFromAnyState2AA(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	vt := pb.MessageType_MsgRequestVote
 	vt_resp := pb.MessageType_MsgRequestVoteResponse
 	for st := StateType(0); st <= StateLeader; st++ {

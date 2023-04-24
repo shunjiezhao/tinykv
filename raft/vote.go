@@ -37,7 +37,6 @@ func (r *Raft) TallyVotes() (granted int, rejected int, _ VoteResult) {
 		}
 	}
 	result := r.VoteResult()
-	log.Debugf("%s Tally Votes %v %v %s", r.info(), granted, rejected, result)
 	return granted, rejected, result
 }
 
@@ -97,43 +96,8 @@ func (r *Raft) VoteResult() VoteResult {
 	return VoteLost
 }
 
-func (r *Raft) handleVote(m pb.Message) {
-	var reject = false
-	if r.Term > m.Term {
-		log.Panicf("term is ==")
-	}
-	if r.Term < m.Term {
-		r.becomeFollower(m.Term, None) // 当前过时, 就将变成 follower
-	}
-	// 比较 谁更新
-	if r.compareLogIsMeNew(&m) {
-		log.Debugf("log is not new")
-		reject = true
-		goto send
-	}
-
-	if r.Vote == None || r.Vote == m.From { // not or repeat
-		r.Vote = m.From
-	}
-	// send response
-send:
-	r.send(r.NewResponseVoteMsg(m.From, reject))
-	return
-}
-
 // true: me new
-func (r *Raft) compareLogIsMeNew(m *pb.Message) bool {
-	lastLog := r.RaftLog.LastLog()
-	if m.LogTerm != lastLog.Term {
-		log.Debugf("%+v", r.RaftLog.entries)
-		log.Debugf("term is not equal, %v %v", m.LogTerm, lastLog.Term)
-		return m.LogTerm < lastLog.Term // from < to ? false : true
-	}
-	// term ==
-	if m.Index < lastLog.Index {
-		log.Debugf("index is not equal")
-		return true
-	}
-	// index from >= to
-	return false
+func (r *Raft) myLogIsOld(term, index uint64) bool {
+	l := r.RaftLog.LastLog()
+	return term > l.Term || (term == l.Term && index >= l.Index)
 }
