@@ -15,7 +15,6 @@
 package raft
 
 import (
-	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"github.com/pkg/errors"
@@ -23,9 +22,9 @@ import (
 
 // RaftLog manage the log entries, its struct look like:
 //
-//  snapshot/first.....applied....committed....stabled.....last
-//  --------|------------------------------------------------|
-//                            log entries
+//	snapshot/first.....applied....committed....stabled.....last
+//	--------|------------------------------------------------|
+//	                          log entries
 //
 // for simplify the RaftLog implement should manage all log entries
 // that not truncated
@@ -64,20 +63,19 @@ func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
 	log := &RaftLog{}
 	log.storage = storage
-	log.entries = make([]pb.Entry, 0) // contain start
+	log.entries = make([]pb.Entry, 1) // contain start
 	state, _, err := log.storage.InitialState()
 	mustBeNil(err)
 	log.committed = state.Commit
-	index, err := storage.FirstIndex()
-	log.start = index
+	start, err := storage.FirstIndex()
+	log.start = start - 1
 	mustBeNil(err)
 	LastIndex, err := storage.LastIndex()
 	mustBeNil(err)
-	entries, err := storage.Entries(index, LastIndex+1)
+	entries, err := storage.Entries(start, LastIndex+1)
 	mustBeNil(err)
 	//todo(judge start)
 	log.entries = append(log.entries, entries...)
-	fmt.Println(log.entries)
 	return log
 }
 
@@ -93,47 +91,52 @@ func (l *RaftLog) maybeCompact() {
 // note, this is one of the test stub functions you need to implement.
 func (l *RaftLog) allEntries() []pb.Entry {
 	// Your Code Here (2A).
-	return l.entries
+	return l.entries[1:]
 }
 
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
-	return nil
+	return l.entries[l.stabled-l.start+1:]
 }
 
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
-	// Your Code Here (2A).
-	return nil
+	if l.applied == l.committed {
+		return l.entries[0:1]
+	}
+
+	if l.applied > l.committed {
+		log.Panicf("applied(%d) > committed(%d)]", l.applied, l.committed)
+	}
+	ents = l.entries[l.applied-l.start : l.committed-l.start+1]
+	return
 }
 
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
-	// Your Code Here (2A).
 	return l.LastLog().Index
 }
 
 func (l *RaftLog) NextIndex() uint64 {
-	// Your Code Here (2A).
 	return l.LastLog().Index + 1
 }
 
 // LastTerm return the last Term of the log entries
 func (l *RaftLog) LastTerm() uint64 {
-	// Your Code Here (2A).
 	return l.LastLog().Term
 }
 
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	return 0, nil
+	at, err := l.entryAt(i)
+	if err != nil {
+		return 0, err
+	}
+	return at.Term, nil
 }
 func (l *RaftLog) LastLog() pb.Entry {
-	if len(l.entries) == 0 {
-		return pb.Entry{}
-	}
 	return l.entries[len(l.entries)-1]
 }
 
@@ -144,9 +147,10 @@ var (
 
 // if not in [First,LastLogIndex] return nil
 func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
-	if index == 0 { // dummp
-		return &pb.Entry{}, nil
+	if index == 0 {
+		return &l.entries[0], nil
 	}
+
 	if index < l.First() { // is compact
 		return nil, LogIsCompacted
 	}
@@ -162,7 +166,7 @@ func (l *RaftLog) append(entries ...pb.Entry) uint64 {
 	return l.LastIndex()
 }
 
-//[lo,hi]
+// [lo,hi]
 func (l *RaftLog) slice(lo, hi uint64) []*pb.Entry {
 	if hi < l.First() {
 		return nil //
@@ -176,7 +180,7 @@ func (l *RaftLog) slice(lo, hi uint64) []*pb.Entry {
 }
 
 func (l *RaftLog) First() uint64 {
-	return l.start
+	return l.start + 1
 }
 
 // use in append log, return log is in [First,LastLogIndex]
@@ -185,11 +189,8 @@ func (l *RaftLog) Contain(index uint64) bool {
 }
 
 func (l *RaftLog) IsConflict(index, term uint64) bool {
-	if l.Contain(index) == false { // not contain this log
-		return false
-	}
-	at, _ := l.entryAt(index)
-	return at.Term != term // if term not equal,is conflict should truncate
+	// not contain this log or if term not equal,is conflict should truncate
+	return !l.Contain(index) || l.entries[index-l.start].Term != term
 }
 
 // truncate index to end(include index)
