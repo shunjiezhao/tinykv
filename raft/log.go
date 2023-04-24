@@ -15,6 +15,7 @@
 package raft
 
 import (
+	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"github.com/pkg/errors"
@@ -63,7 +64,20 @@ func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
 	log := &RaftLog{}
 	log.storage = storage
-	log.entries = make([]pb.Entry, 1) // contain start
+	log.entries = make([]pb.Entry, 0) // contain start
+	state, _, err := log.storage.InitialState()
+	mustBeNil(err)
+	log.committed = state.Commit
+	index, err := storage.FirstIndex()
+	log.start = index
+	mustBeNil(err)
+	LastIndex, err := storage.LastIndex()
+	mustBeNil(err)
+	entries, err := storage.Entries(index, LastIndex+1)
+	mustBeNil(err)
+	//todo(judge start)
+	log.entries = append(log.entries, entries...)
+	fmt.Println(log.entries)
 	return log
 }
 
@@ -117,7 +131,9 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 	return 0, nil
 }
 func (l *RaftLog) LastLog() pb.Entry {
-	log.Debugf("%+v", l.entries)
+	if len(l.entries) == 0 {
+		return pb.Entry{}
+	}
 	return l.entries[len(l.entries)-1]
 }
 
@@ -128,7 +144,10 @@ var (
 
 // if not in [First,LastLogIndex] return nil
 func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
-	if index < l.First() && index != 0 { // is compact
+	if index == 0 { // dummp
+		return &pb.Entry{}, nil
+	}
+	if index < l.First() { // is compact
 		return nil, LogIsCompacted
 	}
 	if index > l.LastIndex() { // exceed
@@ -157,7 +176,7 @@ func (l *RaftLog) slice(lo, hi uint64) []*pb.Entry {
 }
 
 func (l *RaftLog) First() uint64 {
-	return l.start + 1
+	return l.start
 }
 
 // use in append log, return log is in [First,LastLogIndex]

@@ -167,7 +167,10 @@ func MessageStr(r *Raft, m pb.Message) string {
 		return fmt.Sprintf("[HeartBeat] send")
 	case pb.MessageType_MsgPropose:
 	case pb.MessageType_MsgRequestVote:
-		return fmt.Sprintf("[RequestVote] Commit: %v to %v", r.RaftLog.committed, m.To)
+		return fmt.Sprintf("[RequestVote] From: {%v Term:%v LogTerm:%v}  Commit: %v to %v", m.From,
+			m.Term, m.LogTerm, r.RaftLog.committed,
+			m.To)
+
 	case pb.MessageType_MsgRequestVoteResponse:
 		return fmt.Sprintf("[RequestVoteResponse]  Commit: %v to %v Reject: %v", r.RaftLog.committed, m.To, m.Reject)
 	case pb.MessageType_MsgHeartbeat:
@@ -175,7 +178,12 @@ func MessageStr(r *Raft, m pb.Message) string {
 	case pb.MessageType_MsgHeartbeatResponse:
 		return fmt.Sprintf("[HeartBeatResponse] Commit: %v to %v", r.RaftLog.committed, m.To)
 	case pb.MessageType_MsgAppend:
-		return fmt.Sprintf("[Appendd] PrevInfo:{%v:%v}", m.Index, m.LogTerm)
+		if len(m.Entries) != 0 {
+			return fmt.Sprintf("[Append] PrevInfo:{%v:%v} entries:{start: %v end: %v}", m.Index, m.LogTerm,
+				m.Entries[0].Index, m.Entries[len(m.Entries)-1].Index)
+		}
+		return fmt.Sprintf("[Append] PrevInfo:{%v:%v}", m.Index, m.LogTerm)
+
 	case pb.MessageType_MsgAppendResponse:
 		return fmt.Sprintf("[AppendRespons] Commit: %v Reject: %v to %v", r.RaftLog.committed, m.Reject, m.To)
 
@@ -185,4 +193,9 @@ func MessageStr(r *Raft, m pb.Message) string {
 
 func (r *Raft) info() string {
 	return fmt.Sprintf("{%x:%s:%d} ", r.id, r.State, r.Term)
+}
+func mustBeNil(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
