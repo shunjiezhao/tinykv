@@ -163,20 +163,19 @@ func MessageStr(r *Raft, m pb.Message) string {
 	switch m.MsgType {
 	case pb.MessageType_MsgHup:
 		return fmt.Sprintf("[HUP] send")
-	case pb.MessageType_MsgBeat:
-		return fmt.Sprintf("[HeartBeat] send")
 	case pb.MessageType_MsgPropose:
+		return fmt.Sprintf("[Propose] entriesLen: %d", len(m.Entries))
 	case pb.MessageType_MsgRequestVote:
 		return fmt.Sprintf("[RequestVote] From: {%v Term:%v LogTerm:%v}  Commit: %v to %v", m.From,
 			m.Term, m.LogTerm, r.RaftLog.committed,
 			m.To)
 
 	case pb.MessageType_MsgRequestVoteResponse:
-		return fmt.Sprintf("[RequestVoteResponse]  Commit: %v to %v Reject: %v", r.RaftLog.committed, m.To, m.Reject)
+		return fmt.Sprintf("[RequestVoteResponse]  {Commit: %v} {to %v} {Reject: %v}", r.RaftLog.committed, m.To, m.Reject)
 	case pb.MessageType_MsgHeartbeat:
-		return fmt.Sprintf("[HeartBeat] Commit: %v to %v", r.RaftLog.committed, m.To)
+		return fmt.Sprintf("[HeartBeat] {Commit: %v}{to %v}", r.RaftLog.committed, m.To)
 	case pb.MessageType_MsgHeartbeatResponse:
-		return fmt.Sprintf("[HeartBeatResponse] Commit: %v to %v", r.RaftLog.committed, m.To)
+		return fmt.Sprintf("[HeartBeatResponse] {Commit: %v}{to %v}", r.RaftLog.committed, m.To)
 	case pb.MessageType_MsgAppend:
 		if len(m.Entries) != 0 {
 			return fmt.Sprintf("[Append] PrevInfo:{%v:%v} entries:{start: %v end: %v}", m.Index, m.LogTerm,

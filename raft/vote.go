@@ -18,6 +18,7 @@ func (r *Raft) RecordVote(id uint64, v bool) {
 	_, ok := r.votes[id]
 	if !ok {
 		r.votes[id] = v
+		log.Debugf("record vote %x", id)
 	} else {
 		log.Debugf("%x already exist", id)
 	}
