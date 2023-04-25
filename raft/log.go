@@ -103,13 +103,14 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	if l.applied == l.committed {
-		return l.entries[0:1]
+		return l.entries[0:0]
 	}
 
 	if l.applied > l.committed {
 		log.Panicf("applied(%d) > committed(%d)]", l.applied, l.committed)
 	}
-	ents = l.entries[l.applied-l.start : l.committed-l.start+1]
+	ents = l.entries[l.applied-l.start+1 : l.committed-l.start+1]
+	log.Errorf("nextEnts: %v", ents)
 	return
 }
 
@@ -168,6 +169,9 @@ func (l *RaftLog) append(entries ...pb.Entry) uint64 {
 
 // [lo,hi]
 func (l *RaftLog) slice(lo, hi uint64) []*pb.Entry {
+	if hi < lo {
+		return nil
+	}
 	if hi < l.First() {
 		return nil //
 	}
@@ -199,7 +203,7 @@ func (l *RaftLog) truncate(index uint64) {
 }
 func (l *RaftLog) updateCommitIndex(commit uint64) {
 	if commit < l.committed {
-		log.Panicf("check source commit not back up")
+		return
 	}
 	l.committed = commit
 }

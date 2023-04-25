@@ -1,8 +1,8 @@
 package raft
 
 import (
+	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
-	log "github.com/sirupsen/logrus"
 )
 
 func (r *Raft) NewHeartbeatMsg(to uint64) pb.Message {
@@ -38,6 +38,7 @@ func (r *Raft) NewRespVoteMsg(to uint64, reject bool) pb.Message {
 	return pb.Message{
 		MsgType: pb.MessageType_MsgRequestVoteResponse,
 		To:      to,
+		From:    r.id,
 		Reject:  reject,
 	}
 }
@@ -49,9 +50,6 @@ func (r *Raft) NewAppendMsg(to uint64) pb.Message {
 	pr, ok := r.Prs[to]
 	if !ok {
 		log.Panicf("don't have this node %d ?", pr)
-	}
-	if pr.Next-1 == r.RaftLog.LastIndex() {
-		log.Panicf("you should check you want to send")
 	}
 
 	prevLog, err := r.RaftLog.entryAt(pr.Next - 1)
