@@ -72,8 +72,10 @@ type RawNode struct {
 	Raft *Raft
 
 	// Your Data Here (2A).
-	done   chan struct{}
-	ticker *time.Ticker
+	done      chan struct{}
+	ticker    *time.Ticker
+	hardState pb.HardState
+	softState *SoftState
 }
 
 var TickerInterval = 75 * time.Millisecond
@@ -84,7 +86,16 @@ func NewRawNode(config *Config) (*RawNode, error) {
 	node := &RawNode{}
 	node.Raft = newRaft(config)
 	node.ticker = time.NewTicker(TickerInterval)
+	node.hardState = pb.HardState{
+		Term:   node.Raft.Term,
+		Vote:   node.Raft.Vote,
+		Commit: node.Raft.RaftLog.committed,
+	}
 
+	node.softState = &SoftState{
+		Lead:      node.Raft.Lead,
+		RaftState: node.Raft.State,
+	}
 	go node.Run()
 	return node, nil
 }
@@ -153,13 +164,50 @@ func (rn *RawNode) Step(m pb.Message) error {
 
 // Ready returns the current point-in-time state of this RawNode.
 func (rn *RawNode) Ready() Ready {
-	// Your Code Here (2A).
-	return Ready{}
+	r := Ready{
+		Entries:          rn.Raft.RaftLog.unstableEntries(),
+		Snapshot:         pb.Snapshot{},
+		CommittedEntries: rn.Raft.RaftLog.nextEnts(),
+		Messages:         rn.Raft.msgs,
+	}
+
+	if rn.softState.RaftState != rn.Raft.State {
+		r.SoftState = &SoftState{
+			Lead:      rn.Raft.Lead,
+			RaftState: rn.Raft.State,
+		}
+	}
+	if rn.hardState.Vote != rn.Raft.Vote || rn.hardState.Term != rn.Raft.Term || rn.hardState.Commit != rn.Raft.RaftLog.committed {
+		r.HardState = pb.HardState{
+			Term:   rn.Raft.Term,
+			Vote:   rn.Raft.Vote,
+			Commit: rn.Raft.RaftLog.committed,
+		}
+	}
+	return r
 }
 
 // HasReady called when RawNode user need to check if any Ready pending.
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
+	if len(rn.Raft.RaftLog.unstableEntries()) != 0 { // 追加的日志代持久化持久化
+		return true
+	}
+
+	if len(rn.Raft.RaftLog.nextEnts()) != 0 { // 应用
+		return true
+
+	}
+
+	if len(rn.Raft.msgs) != 0 { // 发送
+		return true
+	}
+
+	// 检查是否有term,vote变化
+	if rn.hardState.Term != rn.Raft.Term || rn.hardState.Vote != rn.Raft.Vote {
+		return true
+	}
+
 	return false
 }
 
@@ -167,6 +215,18 @@ func (rn *RawNode) HasReady() bool {
 // last Ready results.
 func (rn *RawNode) Advance(rd Ready) {
 	// Your Code Here (2A).
+	if rd.HardState.Commit > rn.hardState.Commit || rd.HardState.Term > rn.hardState.Term || rd.HardState.Vote > rn.hardState.Vote {
+		rn.hardState = rd.HardState
+	}
+
+	rLog := rn.Raft.RaftLog
+	rLog.applied = max(rn.hardState.Commit, rLog.applied)
+	if len(rd.Entries) > 0 {
+		rLog.stabled = rd.Entries[len(rd.Entries)-1].Index
+		rLog.cutDown(rLog.stabled)
+	}
+	rn.Raft.msgs = nil
+	log.Debugf("advance 1")
 }
 
 // GetProgress return the Progress of this node and its peers, if this

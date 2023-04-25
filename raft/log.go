@@ -15,6 +15,7 @@
 package raft
 
 import (
+	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"github.com/pkg/errors"
@@ -65,17 +66,22 @@ func newLog(storage Storage) *RaftLog {
 	log.storage = storage
 	log.entries = make([]pb.Entry, 1) // contain start
 	state, _, err := log.storage.InitialState()
-	mustBeNil(err)
 	log.committed = state.Commit
+	mustBeNil(err)
 	start, err := storage.FirstIndex()
 	log.start = start - 1
+	log.applied = log.start
 	mustBeNil(err)
 	LastIndex, err := storage.LastIndex()
+	log.stabled = LastIndex
 	mustBeNil(err)
+
 	entries, err := storage.Entries(start, LastIndex+1)
 	mustBeNil(err)
 	//todo(judge start)
 	log.entries = append(log.entries, entries...)
+
+	fmt.Printf("newLog: %+v\n", log)
 	return log
 }
 
@@ -96,14 +102,18 @@ func (l *RaftLog) allEntries() []pb.Entry {
 
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
+	if l.stabled == l.LastIndex() {
+		return []pb.Entry{}
+	}
 	// Your Code Here (2A).
+	log.Debugf("unstableEntries: start: %d, stabled: %d, len: %d\n", l.start, l.stabled, len(l.entries))
 	return l.entries[l.stabled-l.start+1:]
 }
 
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	if l.applied == l.committed {
-		return l.entries[0:0]
+		return []pb.Entry{}
 	}
 
 	if l.applied > l.committed {
@@ -200,10 +210,27 @@ func (l *RaftLog) IsConflict(index, term uint64) bool {
 // truncate index to end(include index)
 func (l *RaftLog) truncate(index uint64) {
 	l.entries = l.entries[:index-l.start]
+	l.stabled = min(l.stabled, l.LastIndex())
 }
+
 func (l *RaftLog) updateCommitIndex(commit uint64) {
 	if commit < l.committed {
 		return
 	}
 	l.committed = commit
+}
+
+// cutDown cut down the log entries to (index,LastLogIndex]
+func (l *RaftLog) cutDown(index uint64) {
+	if index > l.LastIndex() {
+		log.Panicf("cutDown: index(%d) > LastIndex(%d)", index, l.LastIndex())
+	}
+
+	cp := make([]pb.Entry, l.LastIndex()-index+1)
+	cp[0].Term, cp[0].Index = l.entries[len(l.entries)-1].Term, l.entries[len(l.entries)-1].Index
+	if index+1 < l.LastIndex() {
+		copy(cp[1:], l.entries[index+1:])
+	}
+	l.entries = cp
+	l.start = index
 }

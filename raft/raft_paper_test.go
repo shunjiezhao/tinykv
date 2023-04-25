@@ -388,7 +388,7 @@ func TestLeaderStartReplication2AB(t *testing.T) {
 		{From: 1, To: 3, Term: 1, MsgType: pb.MessageType_MsgAppend, Index: li, LogTerm: 1, Entries: []*pb.Entry{&ent}, Commit: li},
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
-		t.Errorf("\nmsgs = %+v\n, want %+v", msgs, wmsgs)
+		t.Errorf("msgs = \n%+v\n, want\n%+v", msgs, wmsgs)
 	}
 	if g := r.RaftLog.unstableEntries(); !reflect.DeepEqual(g, wents) {
 		t.Errorf("ents = %+v, want %+v", g, wents)
@@ -403,6 +403,7 @@ func TestLeaderStartReplication2AB(t *testing.T) {
 // servers eventually find out.
 // Reference: section 5.3
 func TestLeaderCommitEntry2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	s := NewMemoryStorage()
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, s)
 	r.becomeCandidate()
@@ -424,6 +425,7 @@ func TestLeaderCommitEntry2AB(t *testing.T) {
 	}
 	msgs := r.readMessages()
 	sort.Sort(messageSlice(msgs))
+	t.Log(msgs)
 	for i, m := range msgs {
 		if w := uint64(i + 2); m.To != w {
 			t.Errorf("to = %d, want %d", m.To, w)
@@ -618,6 +620,7 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 // Also, it writes the new entry into stable storage.
 // Reference: section 5.3
 func TestFollowerAppendEntries2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	tests := []struct {
 		index, term uint64
 		lterm       uint64
@@ -673,7 +676,7 @@ func TestFollowerAppendEntries2AB(t *testing.T) {
 			wunstable = append(wunstable, *ent)
 		}
 		if g := r.RaftLog.unstableEntries(); !reflect.DeepEqual(g, wunstable) {
-			t.Errorf("#%d: unstableEnts = %+v, want %+v", i, g, wunstable)
+			t.Errorf("#%d: unstableEnts =\n%+v, want\n%+v", i, g, wunstable)
 		}
 	}
 }
@@ -854,6 +857,7 @@ func TestVoter2AB(t *testing.T) {
 // current term are committed by counting replicas.
 // Reference: section 5.4.2
 func TestLeaderOnlyCommitsLogFromCurrentTerm2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	ents := []pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}}
 	tests := []struct {
 		index   uint64

@@ -57,6 +57,7 @@ func (r *Raft) readMessages() []pb.Message {
 }
 
 func TestProgressLeader2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	r := newTestRaft(1, []uint64{1, 2}, 5, 1, NewMemoryStorage())
 	r.becomeCandidate()
 	r.becomeLeader()
@@ -309,6 +310,7 @@ func TestLogReplication2AB(t *testing.T) {
 }
 
 func TestSingleNodeCommit2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	tt := newNetwork(nil)
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("some data")}}})
@@ -908,6 +910,7 @@ func TestDisruptiveFollower2AA(t *testing.T) {
 }
 
 func TestHeartbeatUpdateCommit2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	tests := []struct {
 		failCnt    int
 		successCnt int
