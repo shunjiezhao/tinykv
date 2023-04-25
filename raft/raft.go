@@ -172,7 +172,7 @@ type Raft struct {
 	tick                      func()
 }
 
-var rd = rand.NewSource(time.Now().Unix())
+var rd = rand.NewSource(time.Now().UnixNano())
 
 func randN(n int) int {
 	return int(rd.Int63()) % n
@@ -199,7 +199,7 @@ func newRaft(c *Config) *Raft {
 		storage:          c.Storage,
 		msgs:             []pb.Message{},
 		heartbeatTimeout: c.HeartbeatTick,
-		electionTimeout:  c.ElectionTick + randN(c.ElectionTick), // [el, 2*el-1]
+		electionTimeout:  c.ElectionTick, // [el, 2*el-1]
 	}
 	if raft.id == 0 {
 		log.Panicf("id is 0, can't not be raft")
@@ -220,10 +220,6 @@ func newRaft(c *Config) *Raft {
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
-	if to == r.id {
-		log.Panicf("??? you send log to your self, can you use appendEntries")
-	}
-	// Your Code Here (2A).
 	pr := r.Prs[to]
 	if pr.Next == r.RaftLog.NextIndex() {
 		log.Debugf("%d don't have log send to %d", r.id, to)
@@ -239,7 +235,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		log.Panicf("send your self ?")
 	}
 	// Your Code Here (2A).
-	msg := r.NewHeartbeatMsg(to) // 匹配, 自己
+	msg := r.NewHeartbeatMsg(to) // 匹配
 	r.send(msg)
 	log.Debugf("append msg %s", MessageStr(r, msg))
 }
@@ -288,7 +284,6 @@ func (r *Raft) tickElection() {
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
 	r.step = stepFollower
-
 	// 1. 任期
 	r.reset(term)
 	// 2. 投票
@@ -310,6 +305,7 @@ func (r *Raft) becomeCandidate() {
 	r.State = StateCandidate
 	r.tick = r.tickElection
 	r.Vote = r.id
+	log.Debugf("%d", r.Vote)
 	r.votes = map[uint64]bool{} // RESET
 	log.Infof("%s became candidate at term %d", r.info(), r.Term)
 }
@@ -333,8 +329,8 @@ func (r *Raft) becomeLeader() {
 	// 3. lead = me
 	r.Lead = r.id
 	// 4.todo:append Empty Log
-	entry := &pb.Entry{Term: r.Term, Index: 1, Data: nil}
-	r.leaderAppendEntries(entry)
+	entry := &pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1, Data: nil}
+	r.RaftLog.append(*entry)
 	log.Infof("%s became %s at term %d", r.info(), r.State, r.Term)
 }
 
@@ -345,9 +341,10 @@ func stepFollower(r *Raft, m pb.Message) error {
 	r.becomeFollower(m.Term, m.From)
 	switch m.MsgType {
 	case pb.MessageType_MsgHeartbeat:
+		r.becomeFollower(m.Term, m.From)
 		r.handleHeartbeat(m)
-
 	case pb.MessageType_MsgAppend:
+		r.becomeFollower(m.Term, m.From)
 		r.handleAppendEntries(m)
 
 	}
@@ -360,8 +357,12 @@ func stepCandidate(r *Raft, m pb.Message) error {
 
 	switch m.MsgType {
 	case pb.MessageType_MsgBeat:
+		r.becomeFollower(m.Term, m.From)
 		r.handleHeartbeat(m)
-	//case pb.MessageType_MsgHup:
+	case pb.MessageType_MsgAppend:
+		r.becomeFollower(m.Term, m.From)
+		r.handleAppendEntries(m)
+
 	case pb.MessageType_MsgRequestVoteResponse:
 		gr, rj, res := r.poll(m.From, m.MsgType, !m.Reject) //Reject = true stand not vote
 		log.Infof("%s has received %s %d votes and %d vote rejections result: %v", r.info(), MessageStr(r, m), gr, rj, res)
@@ -370,7 +371,7 @@ func stepCandidate(r *Raft, m pb.Message) error {
 		case VoteWon:
 			if r.State == StateCandidate {
 				r.becomeLeader()
-				r.bcastAppend()
+				r.bcastAppend(false)
 			}
 		case VoteLost:
 			// pb.MsgPreVoteResp contains future term of pre-candidate
@@ -401,8 +402,10 @@ func stepLeader(r *Raft, m pb.Message) error {
 			pr.Match = max(pr.Match, m.Index)
 			log.Infof("%s has received %s index: %d", r.info(), MessageStr(r, m), m.Index)
 			// 2. update commit
-			old := r.RaftLog.committed
-			if old < r.updateCommit() {
+			oldCommit := r.RaftLog.committed
+			newCommit := r.updateCommit()
+			if oldCommit < newCommit {
+				log.Debugf("get commit :%d", newCommit)
 				r.Visit(func(idx int, to uint64) {
 					r.sendHeartbeat(to)
 				}, false)
@@ -417,6 +420,7 @@ func stepLeader(r *Raft, m pb.Message) error {
 		// 1. 追赶日志
 		r.sendAppend(m.From)
 	}
+
 	return nil
 }
 
@@ -444,6 +448,7 @@ func (r *Raft) updateCommit() uint64 {
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
 	log.Infof("%s receive msg: %s", r.info(), MessageStr(r, m))
+
 	switch {
 	case m.Term == 0: //local
 	case r.Term > m.Term: // 过时的
@@ -472,6 +477,10 @@ func (r *Raft) Step(m pb.Message) error {
 		} else {
 			r.send(r.NewRespVoteMsg(m.From, true))
 		}
+	case pb.MessageType_MsgBeat:
+		if r.State == StateLeader {
+			r.bckstHeart()
+		}
 	default:
 		err := r.step(r, m)
 		if err != nil {
@@ -481,7 +490,11 @@ func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 	return nil
 }
-
+func (r *Raft) bckstHeart() {
+	r.Visit(func(idx int, to uint64) {
+		r.sendHeartbeat(to)
+	}, false)
+}
 func (r *Raft) hup() {
 	if r.State == StateLeader {
 		log.Infof("%s is already leader", r.info())
@@ -491,7 +504,7 @@ func (r *Raft) hup() {
 	ids := nodes(r)
 	for _, id := range ids {
 		if id == r.id {
-			r.send(r.NewRespVoteMsg(r.id, false))
+			r.Step(r.NewRespVoteMsg(r.id, false))
 			continue
 		}
 		r.send(r.NewRequestVoteMsg(id))
@@ -506,8 +519,9 @@ func (r *Raft) send(m pb.Message) {
 	if m.From == None {
 		m.From = r.id
 	}
-	log.Debugf("%s send msg %+v", r.info(), MessageStr(r, m))
+
 	r.msgs = append(r.msgs, m)
+
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -516,7 +530,6 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	var reject = false
 	var index uint64 = 0
 	var myCommit uint64
-	var newIndex uint64
 
 	// is prevLog Index
 	prevLog, err := r.RaftLog.entryAt(m.Index)
@@ -539,16 +552,17 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	// append
 	r.resetElectionTimeOut() // todo(in req vote and vote to other)
 	// log
-	newIndex = r.appendEntries(m.Entries...)
+	r.appendEntries(m.Entries...)
 	// update commit
 	myCommit = r.RaftLog.committed
-	if myCommit < m.Commit { // < leader commit
-		r.RaftLog.updateCommitIndex(min(newIndex, m.Commit))
-		log.Infof("%s update commit %d->%d", r.info(), myCommit, min(newIndex, m.Commit))
+
+	index = m.Index + uint64(len(m.Entries)) // update index all log we received
+	if myCommit < m.Commit {                 // < leader commit
+		r.RaftLog.updateCommitIndex(min(index, m.Commit))
+		log.Infof("%s update commit %d->%d", r.info(), myCommit, min(index, m.Commit))
 	}
 	// update send index
-	index = m.Index + uint64(len(m.Entries)) // update index all log we received
-	log.Debugf("%s commit %d LeaderCommit: %d", r.info(), r.RaftLog.committed, m.Commit)
+	log.Debugf("%s commit %d NewIndex: %d LeaderCommit: %d", r.info(), r.RaftLog.committed, index, m.Commit)
 send:
 	msg := r.NewRespAppendMsg(m.From, index, reject)
 	r.send(msg)
@@ -561,9 +575,6 @@ func (r *Raft) resetElectionTimeOut() {
 // handleHeartbeat handle Heartbeat RPC request
 func (r *Raft) handleHeartbeat(m pb.Message) {
 	// Your Code Here (2A).
-	if r.Lead != m.From {
-		log.Panicf("ont term have to leader? %d vs %d", r.Lead, m.From)
-	}
 	// 更新选举时间
 	r.resetElectionTimeOut()
 	// 更新 commit
@@ -575,7 +586,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleProse(m pb.Message) {
 	r.leaderAppendEntries(m.Entries...)
-	r.bcastAppend()
+	r.bcastAppend(true)
 }
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
@@ -591,12 +602,13 @@ func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
 }
 
-func (r *Raft) bcastAppend() {
+func (r *Raft) bcastAppend(me bool) {
 	r.Visit(func(idx int, to uint64) {
 		r.sendAppend(to)
-	}, false)
+	}, me)
 }
 
+// leaderAppendEntries don't boardcast
 func (r *Raft) leaderAppendEntries(es ...*pb.Entry) uint64 {
 	if r.State != StateLeader {
 		log.Panicf("you should check your state %s", r.State)
@@ -609,20 +621,20 @@ func (r *Raft) leaderAppendEntries(es ...*pb.Entry) uint64 {
 		esA[i] = *es[i]
 	}
 	li = r.RaftLog.append(esA...)
-	r.send(pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: r.id, Index: li, Reject: false})
-	r.bcastAppend()
 	return li
 }
 
 func (r *Raft) appendEntries(entries ...*pb.Entry) uint64 {
 	for _, entry := range entries {
 		// if has this log we should truncate
-		if r.RaftLog.IsConflict(entry.Index, entry.Term) {
+		if entry.Index <= r.RaftLog.LastIndex() && r.RaftLog.IsConflict(entry.Index, entry.Term) {
+			log.Debugf("%s truncate log %d", r.info(), entry.Index)
 			r.RaftLog.truncate(entry.Index) //
 		} else if r.RaftLog.Contain(entry.Index) {
 			continue
 		}
 		// new log
+		log.Debugf("%s append log %s", r.info(), entry)
 		r.RaftLog.append(*entry)
 	}
 	// update commit

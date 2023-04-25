@@ -57,7 +57,6 @@ func (r *Raft) readMessages() []pb.Message {
 }
 
 func TestProgressLeader2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
 	r := newTestRaft(1, []uint64{1, 2}, 5, 1, NewMemoryStorage())
 	r.becomeCandidate()
 	r.becomeLeader()
@@ -104,7 +103,6 @@ func TestLeaderElection2AA(t *testing.T) {
 // and be elected in turn. This ensures that elections work when not
 // starting from a clean slate (as they do in TestLeaderElection)
 func TestLeaderCycle2AA(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
 	var cfg func(*Config)
 	n := newNetworkWithConfig(cfg, nil, nil, nil)
 	for campaignerID := uint64(1); campaignerID <= 3; campaignerID++ {
@@ -129,7 +127,6 @@ func TestLeaderCycle2AA(t *testing.T) {
 // log entries, and must overwrite higher-term log entries with
 // lower-term ones.
 func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_DEBUG)
 	cfg := func(c *Config) {
 		c.peers = idsBySize(5)
 	}
@@ -193,7 +190,6 @@ func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
 }
 
 func TestVoteFromAnyState2AA(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
 	vt := pb.MessageType_MsgRequestVote
 	vt_resp := pb.MessageType_MsgRequestVoteResponse
 	for st := StateType(0); st <= StateLeader; st++ {
@@ -307,6 +303,7 @@ func TestLogReplication2AB(t *testing.T) {
 					t.Errorf("#%d.%d: data = %d, want %d", i, j, ents[k].Data, m.Entries[0].Data)
 				}
 			}
+			log.Debugf("\n\n\n")
 		}
 	}
 }
@@ -442,7 +439,9 @@ func TestDuelingCandidates2AB(t *testing.T) {
 		} else {
 			t.Logf("#%d: empty log", i)
 		}
+		t.Log("\n\n\n")
 	}
+
 }
 
 func TestCandidateConcede2AB(t *testing.T) {
@@ -567,10 +566,10 @@ func TestProposal2AB(t *testing.T) {
 }
 
 // TestHandleMessageType_MsgAppend ensures:
-// 1. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm.
-// 2. If an existing entry conflicts with a new one (same index but different terms),
-//    delete the existing entry and all that follow it; append any new entries not already in the log.
-// 3. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry).
+//  1. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm.
+//  2. If an existing entry conflicts with a new one (same index but different terms),
+//     delete the existing entry and all that follow it; append any new entries not already in the log.
+//  3. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry).
 func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 	tests := []struct {
 		m       pb.Message
@@ -603,6 +602,7 @@ func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 		sm.becomeFollower(2, None)
 
 		sm.handleAppendEntries(tt.m)
+		t.Log(i)
 		if sm.RaftLog.LastIndex() != tt.wIndex {
 			t.Errorf("#%d: lastIndex = %d, want %d", i, sm.RaftLog.LastIndex(), tt.wIndex)
 		}
@@ -616,6 +616,7 @@ func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 		if m[0].Reject != tt.wReject {
 			t.Errorf("#%d: reject = %v, want %v", i, m[0].Reject, tt.wReject)
 		}
+		log.Debugf("\n\n\n")
 	}
 }
 
@@ -916,12 +917,15 @@ func TestHeartbeatUpdateCommit2AB(t *testing.T) {
 		{5, 10},
 	}
 	for i, tt := range tests {
+		t.Log(i)
 		sm1 := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		sm2 := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		sm3 := newTestRaft(3, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		nt := newNetwork(sm1, sm2, sm3)
 		nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
+		t.Log("send done")
 		nt.isolate(1)
+		t.Log("isolate 1")
 		// propose log to old leader should fail
 		for i := 0; i < tt.failCnt; i++ {
 			nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
@@ -929,6 +933,7 @@ func TestHeartbeatUpdateCommit2AB(t *testing.T) {
 		if sm1.RaftLog.committed > 1 {
 			t.Fatalf("#%d: unexpected commit: %d", i, sm1.RaftLog.committed)
 		}
+		t.Logf("\n\n\n")
 		// propose log to cluster should success
 		nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgHup})
 		for i := 0; i < tt.successCnt; i++ {
@@ -1669,6 +1674,7 @@ func (nw *network) ignore(t pb.MessageType) {
 func (nw *network) recover() {
 	nw.dropm = make(map[connem]float64)
 	nw.ignorem = make(map[pb.MessageType]bool)
+	log.Debugf("network recovered")
 }
 
 func (nw *network) filter(msgs []pb.Message) []pb.Message {

@@ -27,6 +27,7 @@ package raft
 
 import (
 	"fmt"
+	"github.com/pingcap-incubator/tinykv/log"
 	"reflect"
 	"sort"
 	"testing"
@@ -127,6 +128,7 @@ func TestCandidateStartNewElection2AA(t *testing.T) {
 // round of RequestVote RPCs.
 // Reference: section 5.2
 func testNonleaderStartElection(t *testing.T, state StateType) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	// election timeout
 	et := 10
 	r := newTestRaft(1, []uint64{1, 2, 3}, et, 1, NewMemoryStorage())
@@ -157,7 +159,7 @@ func testNonleaderStartElection(t *testing.T, state StateType) {
 		{From: 1, To: 3, Term: 2, MsgType: pb.MessageType_MsgRequestVote},
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
-		t.Errorf("msgs = %v, want %v", msgs, wmsgs)
+		t.Errorf("msgs =\n %v\n, want %v", msgs, wmsgs)
 	}
 }
 
@@ -386,7 +388,7 @@ func TestLeaderStartReplication2AB(t *testing.T) {
 		{From: 1, To: 3, Term: 1, MsgType: pb.MessageType_MsgAppend, Index: li, LogTerm: 1, Entries: []*pb.Entry{&ent}, Commit: li},
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
-		t.Errorf("msgs = %+v, want %+v", msgs, wmsgs)
+		t.Errorf("\nmsgs = %+v\n, want %+v", msgs, wmsgs)
 	}
 	if g := r.RaftLog.unstableEntries(); !reflect.DeepEqual(g, wents) {
 		t.Errorf("ents = %+v, want %+v", g, wents)
@@ -488,6 +490,7 @@ func TestLeaderCommitPrecedingEntries2AB(t *testing.T) {
 		{{Term: 1, Index: 1}},
 	}
 	for i, tt := range tests {
+		t.Log(i)
 		storage := NewMemoryStorage()
 		storage.Append(tt)
 		r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, storage)
@@ -503,7 +506,7 @@ func TestLeaderCommitPrecedingEntries2AB(t *testing.T) {
 		li := uint64(len(tt))
 		wents := append(tt, pb.Entry{Term: 3, Index: li + 1}, pb.Entry{Term: 3, Index: li + 2, Data: []byte("some data")})
 		if g := r.RaftLog.nextEnts(); !reflect.DeepEqual(g, wents) {
-			t.Errorf("#%d: ents = %+v, want %+v", i, g, wents)
+			t.Errorf("#%d: \nents = %+v\n want %+v", i, g, wents)
 		}
 	}
 }
@@ -902,6 +905,7 @@ func commitNoopEntry(r *Raft, s *MemoryStorage) {
 	msgs := r.readMessages()
 	for _, m := range msgs {
 		if m.MsgType != pb.MessageType_MsgAppend || len(m.Entries) != 1 || m.Entries[0].Data != nil {
+			fmt.Printf("%+v", m)
 			panic("not a message to append noop entry")
 		}
 		r.Step(acceptAndReply(m))
@@ -915,6 +919,7 @@ func commitNoopEntry(r *Raft, s *MemoryStorage) {
 
 func acceptAndReply(m pb.Message) pb.Message {
 	if m.MsgType != pb.MessageType_MsgAppend {
+		log.Errorf("%+v", m)
 		panic("type should be MessageType_MsgAppend")
 	}
 	// Note: reply message don't contain LogTerm
