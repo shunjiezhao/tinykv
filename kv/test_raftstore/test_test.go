@@ -3,6 +3,9 @@ package test_raftstore
 import (
 	"bytes"
 	"fmt"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
+	"github.com/pingcap-incubator/tinykv/proto/pkg/raft_cmdpb"
+	"github.com/stretchr/testify/assert"
 	"math/rand"
 	_ "net/http/pprof"
 	"strconv"
@@ -14,10 +17,7 @@ import (
 	"github.com/Connor1996/badger"
 	"github.com/pingcap-incubator/tinykv/kv/config"
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/meta"
-	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/log"
-	"github.com/pingcap-incubator/tinykv/proto/pkg/raft_cmdpb"
-	"github.com/stretchr/testify/assert"
 )
 
 // a client runs the function f and then signals it is done
@@ -207,14 +207,14 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 				if (rand.Int() % 1000) < 500 {
 					key := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
 					value := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
-					// log.Infof("%d: client new put %v,%v\n", cli, key, value)
+					log.Infof("%d: client new put %v,%v\n", cli, key, value)
 					cluster.MustPut([]byte(key), []byte(value))
 					last = NextValue(last, value)
 					j++
 				} else {
 					start := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", 0)
 					end := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
-					// log.Infof("%d: client new scan %v-%v\n", cli, start, end)
+					log.Infof("%d: client new scan %v-%v\n", cli, start, end)
 					values := cluster.Scan([]byte(start), []byte(end))
 					v := string(bytes.Join(values, []byte("")))
 					if v != last {
@@ -261,9 +261,9 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			// Wait for a while for servers to shutdown, since
 			// shutdown isn't a real crash and isn't instantaneous
 			time.Sleep(electionTimeout)
-			log.Warnf("restart servers\n")
 			// crash and re-start all
 			for i := 1; i <= nservers; i++ {
+				log.Warnf("restart servers %d\n", i)
 				cluster.StartServer(uint64(i))
 			}
 		}
@@ -330,6 +330,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 }
 
 func TestBasic2B(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_NONE)
 	// Test: one client (2B) ...
 	GenericTest(t, "2B", 1, false, false, false, -1, false, false)
 }
@@ -429,6 +430,7 @@ func TestPersistPartition2B(t *testing.T) {
 }
 
 func TestPersistPartitionUnreliable2B(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	// Test: unreliable net, restarts, partitions, many clients (2B) ...
 	GenericTest(t, "2B", 5, true, true, true, -1, false, false)
 }

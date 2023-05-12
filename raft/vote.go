@@ -25,7 +25,7 @@ func (r *Raft) RecordVote(id uint64, v bool) {
 }
 
 func (r *Raft) TallyVotes() (granted int, rejected int, _ VoteResult) {
-	ids := nodes(r)
+	ids := r.peers
 	for _, id := range ids {
 		v, voted := r.votes[id]
 		if !voted {
@@ -64,7 +64,7 @@ const (
 )
 
 func (r *Raft) VoteResult() VoteResult {
-	servers := nodes(r)
+	servers := r.peers
 	if len(servers) == 0 {
 		// By convention, the elections on an empty config win. This comes in
 		// handy with joint quorums because it'll make a half-populated joint
@@ -87,7 +87,7 @@ func (r *Raft) VoteResult() VoteResult {
 	}
 
 	q := len(servers)/2 + 1
-	log.Infof("get q: %d voteCnt: %d missing: %d", q, votedCnt, missing)
+	log.Infof("%s get q: %d voteCnt: %d missing: %d", r.info(), q, votedCnt, missing)
 	if votedCnt >= q {
 		return VoteWon
 	}

@@ -86,6 +86,7 @@ func TestStartAsFollower2AA(t *testing.T) {
 // as heartbeat to all followers.
 // Reference: section 5.2
 func TestLeaderBcastBeat2AA(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	// heartbeat interval
 	hi := 1
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, hi, NewMemoryStorage())
@@ -895,6 +896,7 @@ func (s messageSlice) Less(i, j int) bool { return fmt.Sprint(s[i]) < fmt.Sprint
 func (s messageSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 func commitNoopEntry(r *Raft, s *MemoryStorage) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	if r.State != StateLeader {
 		panic("it should only be used when it is the leader")
 	}

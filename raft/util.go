@@ -166,7 +166,7 @@ func MessageStr(r *Raft, m pb.Message) string {
 	case pb.MessageType_MsgPropose:
 		return fmt.Sprintf("[Propose] entriesLen: %d", len(m.Entries))
 	case pb.MessageType_MsgRequestVote:
-		return fmt.Sprintf("[RequestVote] From: {%v Term:%v LogTerm:%v}  Commit: %v to %v", m.From,
+		return fmt.Sprintf("[RequestVote] {From: %v Term:%v LogTerm:%v}  Commit: %v to %v", m.From,
 			m.Term, m.LogTerm, r.RaftLog.committed,
 			m.To)
 
@@ -187,7 +187,7 @@ func MessageStr(r *Raft, m pb.Message) string {
 		return fmt.Sprintf("[AppendRespons] {Commit: %v} {Reject: %v} %v to %v", r.RaftLog.committed, m.Reject, m.From, m.To)
 
 	}
-	return ""
+	return m.String()
 }
 
 func (r *Raft) info() string {
