@@ -96,7 +96,6 @@ func NewRawNode(config *Config) (*RawNode, error) {
 		Lead:      node.Raft.Lead,
 		RaftState: node.Raft.State,
 	}
-	go node.Run()
 	return node, nil
 }
 
@@ -166,7 +165,6 @@ func (rn *RawNode) Step(m pb.Message) error {
 func (rn *RawNode) Ready() Ready {
 	r := Ready{
 		Entries:          rn.Raft.RaftLog.unstableEntries(),
-		Snapshot:         pb.Snapshot{},
 		CommittedEntries: rn.Raft.RaftLog.nextEnts(),
 		Messages:         rn.Raft.msgs,
 	}
@@ -221,9 +219,9 @@ func (rn *RawNode) Advance(rd Ready) {
 
 	rLog := rn.Raft.RaftLog
 	rLog.applied = max(rn.hardState.Commit, rLog.applied)
+	log.Debugf("Ready: Update applied to %d", rLog.applied)
 	if len(rd.Entries) > 0 {
-		rLog.stabled = rd.Entries[len(rd.Entries)-1].Index
-		rLog.cutDown(rLog.stabled)
+		rLog.stabled = max(rLog.stabled, rd.Entries[len(rd.Entries)-1].Index)
 	}
 	rn.Raft.msgs = nil
 	log.Debugf("advance 1")
@@ -244,34 +242,4 @@ func (rn *RawNode) GetProgress() map[uint64]Progress {
 // TransferLeader tries to transfer leadership to the given transferee.
 func (rn *RawNode) TransferLeader(transferee uint64) {
 	_ = rn.Raft.Step(pb.Message{MsgType: pb.MessageType_MsgTransferLeader, From: transferee})
-}
-
-func (rn *RawNode) Run() {
-	log.Debug("Run", rn.Raft.id)
-	return
-	for {
-		select {
-		case <-rn.ticker.C:
-			log.Debugf("tick")
-			rn.Tick()
-		//case rd := <-rn.Node.Ready():
-		//	saveToStorage(rd.State, rd.Entries, rd.Snapshot)
-		//	send(rd.Messages)
-		//	if !raft.IsEmptySnap(rd.Snapshot) {
-		//		processSnapshot(rd.Snapshot)
-		//	}
-		//	for _, entry := range rd.CommittedEntries {
-		//		process(entry)
-		//		if entry.Type == eraftpb.EntryType_EntryConfChange {
-		//			var cc eraftpb.ConfChange
-		//			cc.Unmarshal(entry.Data)
-		//			s.Node.ApplyConfChange(cc)
-		//		}
-		//	}
-		//	s.Node.Advance()
-		case <-rn.done:
-			return
-		}
-	}
-
 }

@@ -18,7 +18,6 @@ func (r *Raft) Step(m pb.Message) error {
 		log.Debug("out dated")
 		return nil
 	case r.Term < m.Term:
-		log.Debugf("get msg: %s", MessageStr(r, m))
 		if m.MsgType == pb.MessageType_MsgAppend || m.MsgType == pb.MessageType_MsgHeartbeat || m.MsgType == pb.MessageType_MsgSnapshot {
 			r.becomeFollower(m.Term, m.From)
 		} else {
@@ -33,6 +32,7 @@ func (r *Raft) Step(m pb.Message) error {
 		canVote := r.Vote == m.From ||
 			// ...we haven't voted and we don't think there's a leader yet in this term...
 			(r.Vote == None && r.Lead == None)
+		log.Errorf("can vote: %v, log is old: %v", canVote, r.myLogIsOld(m.LogTerm, m.Index))
 		if canVote && r.myLogIsOld(m.LogTerm, m.Index) {
 			r.electionElapsed = 0
 			r.Vote = m.From
@@ -138,7 +138,7 @@ func stepLeader(r *Raft, m pb.Message) error {
 			}
 
 		} else {
-			//
+			pr.Next--
 			log.Infof("reject")
 		}
 

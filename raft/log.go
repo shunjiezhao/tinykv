@@ -64,7 +64,6 @@ func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
 	log := &RaftLog{}
 	log.storage = storage
-	log.entries = make([]pb.Entry, 1) // contain start
 	state, _, err := log.storage.InitialState()
 	log.committed = state.Commit
 	mustBeNil(err)
@@ -79,6 +78,10 @@ func newLog(storage Storage) *RaftLog {
 	entries, err := storage.Entries(start, LastIndex+1)
 	mustBeNil(err)
 	//todo(judge start)
+	log.entries = make([]pb.Entry, 1) // contain start
+	log.entries[0].Index = log.start
+	log.entries[0].Term, err = storage.Term(log.start)
+	mustBeNil(err)
 	log.entries = append(log.entries, entries...)
 
 	fmt.Printf("newLog: %+v\n", log)
@@ -158,7 +161,7 @@ var (
 
 // if not in [First,LastLogIndex] return nil
 func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
-	if index == 0 {
+	if index == l.start {
 		return &l.entries[0], nil
 	}
 
@@ -209,6 +212,7 @@ func (l *RaftLog) IsConflict(index, term uint64) bool {
 
 // truncate index to end(include index)
 func (l *RaftLog) truncate(index uint64) {
+	log.Infof("truncate: %d", index)
 	l.entries = l.entries[:index-l.start]
 	l.stabled = min(l.stabled, l.LastIndex())
 }
@@ -228,6 +232,7 @@ func (l *RaftLog) cutDown(index uint64) {
 
 	cp := make([]pb.Entry, l.LastIndex()-index+1)
 	cp[0].Term, cp[0].Index = l.entries[len(l.entries)-1].Term, l.entries[len(l.entries)-1].Index
+	log.Warnf("cut down: %d, %d, %d, %d", index, l.LastIndex(), len(l.entries), len(cp))
 	if index+1 < l.LastIndex() {
 		copy(cp[1:], l.entries[index+1:])
 	}

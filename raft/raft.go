@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	"math/rand"
 	"time"
@@ -168,7 +169,7 @@ type Raft struct {
 	// (Used in 3A conf change)
 	PendingConfIndex          uint64
 	randomizedElectionTimeout int
-	tick                      func()
+	//tick                      func()
 }
 
 var rd = rand.NewSource(time.Now().UnixNano())
@@ -182,7 +183,7 @@ func newRaft(c *Config) *Raft {
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
-	state, _, err := c.Storage.InitialState()
+	state, cfg, err := c.Storage.InitialState()
 	if err != nil {
 		log.Panic(err)
 	}
@@ -190,9 +191,7 @@ func newRaft(c *Config) *Raft {
 	// Your Code Here (2A).
 	raft := &Raft{
 		id:               c.ID,
-		peers:            c.peers,
 		RaftLog:          newLog(c.Storage),
-		Prs:              map[uint64]*Progress{},
 		State:            StateFollower,
 		votes:            map[uint64]bool{},
 		storage:          c.Storage,
@@ -204,15 +203,27 @@ func newRaft(c *Config) *Raft {
 	}
 
 	raft.step = stepFollower
-	raft.Term = state.Term
+	raft.reset(state.Term)
 	raft.Vote = state.Vote
+	raft.peers = c.peers
+	raft.RaftLog.applied = c.Applied
+	//if len(cfg.Nodes) != 0 {
+	//	raft.peers = cfg.Nodes
+	//}
+	raft.peers = cfg.Nodes
+	raft.resetPrs()
 
-	for _, peer := range c.peers {
-		raft.Prs[peer] = &Progress{}
-	}
-
-	log.Debugf("New Raft %+v\n", raft)
+	fmt.Printf("New Raft %+v\n", raft)
 	return raft
+}
+func (r *Raft) resetPrs() {
+	r.Prs = map[uint64]*Progress{}
+	for _, peer := range r.peers {
+		r.Prs[peer] = &Progress{
+			Match: r.RaftLog.start,
+			Next:  r.RaftLog.LastIndex() + 1,
+		}
+	}
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
@@ -234,8 +245,8 @@ func (r *Raft) sendHeartbeat(to uint64) {
 }
 
 func (r *Raft) Visit(f func(idx int, to uint64), sendMe bool) {
-	ids := nodes(r)
-	for idx, to := range ids {
+	for idx, to := range r.peers {
+		log.Debugf("visit %d %d", idx, to)
 		if r.id == to && sendMe == false {
 			continue
 		}
@@ -247,28 +258,27 @@ func (r *Raft) Visit(f func(idx int, to uint64), sendMe bool) {
 // tick advances the internal logical clock by a single tick.
 func (r *Raft) tickLeader() {
 	r.heartbeatElapsed++
-	r.electionElapsed++
 	// Your Code Here (2A).
-	if r.State == StateLeader {
-		// 发送心跳
-		if r.heartbeatElapsed >= r.heartbeatTimeout {
-			r.step(r, pb.Message{MsgType: pb.MessageType_MsgBeat})
+	// 发送心跳
+	if r.heartbeatElapsed >= r.heartbeatTimeout {
+		r.heartbeatElapsed = 0
+		if err := r.Step(pb.Message{MsgType: pb.MessageType_MsgBeat}); err != nil {
+			log.Panic(err)
 		}
-		return
-	}
-
-	// follow , candidate
-	if r.electionElapsed >= r.randomizedElectionTimeout {
-		r.becomeCandidate()
 	}
 }
-func (r *Raft) tickElection() {
-	r.electionElapsed++
 
-	if r.pastElectionTimeout() {
-		r.electionElapsed = 0
-		if err := r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgHup}); err != nil {
-			log.Debugf("error occurred during election: %v", err)
+func (r *Raft) tick() {
+	if r.State == StateLeader {
+		r.tickLeader()
+	} else {
+		r.electionElapsed++
+		if r.pastElectionTimeout() {
+			log.Errorf("%s time out", r.info())
+			r.resetElectionTimeOut()
+			if err := r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgHup}); err != nil {
+				log.Debugf("error occurred during election: %v", err)
+			}
 		}
 	}
 }
@@ -282,7 +292,6 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// 2. 投票
 	// 3. leadId
 	r.Lead = lead
-	r.tick = r.tickElection
 	r.electionElapsed = 0   // 清空选举超时
 	r.State = StateFollower // 状态改变
 	if r.Term != 0 {
@@ -296,7 +305,6 @@ func (r *Raft) becomeCandidate() {
 	r.step = stepCandidate
 	r.reset(r.Term + 1)
 	r.State = StateCandidate
-	r.tick = r.tickElection
 	r.Vote = r.id
 	r.votes = map[uint64]bool{} // RESET
 	log.Infof("%s became candidate at term %d", r.info(), r.Term)
@@ -312,12 +320,8 @@ func (r *Raft) becomeLeader() {
 	// 0. state -> Leader
 	r.State = StateLeader
 	r.step = stepLeader
-	r.tick = r.tickLeader
 	// 1. election -> 0
 	r.electionElapsed = 0
-	for _, pr := range r.Prs {
-		pr.Next = pr.Match + 1
-	}
 	// 3. lead = me
 	r.Lead = r.id
 	entry := &pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1, Data: nil}
@@ -325,6 +329,7 @@ func (r *Raft) becomeLeader() {
 	if len(r.peers) == 1 {
 		r.updateCommit()
 	}
+	r.resetPrs()
 	log.Infof("%s became %s at term %d", r.info(), r.State, r.Term)
 }
 
@@ -363,8 +368,7 @@ func (r *Raft) hup() {
 		return
 	}
 	r.becomeCandidate()
-	ids := nodes(r)
-	for _, id := range ids {
+	for _, id := range r.peers {
 		if id == r.id {
 			r.Step(r.NewRespVoteMsg(r.id, false))
 			continue
@@ -383,7 +387,7 @@ func (r *Raft) send(m pb.Message) {
 	}
 
 	r.msgs = append(r.msgs, m)
-	log.Debugf("send %+v", m)
+	log.Warnf("send %+v", m)
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -514,11 +518,8 @@ func (r *Raft) reset(term uint64) {
 	}
 	r.Lead = None
 	r.resetRandomizedElectionTimeout()
-
 	r.electionElapsed = 0
 	r.heartbeatElapsed = 0
-	//r.resetRandomizedElectionTimeout()
-
 	r.votes = map[uint64]bool{}
 }
 func (r *Raft) resetRandomizedElectionTimeout() {
