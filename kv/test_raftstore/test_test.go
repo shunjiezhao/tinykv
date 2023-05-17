@@ -436,6 +436,7 @@ func TestPersistPartitionUnreliable2B(t *testing.T) {
 }
 
 func TestOneSnapshot2C(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	cfg := config.NewTestConfig()
 	cfg.RaftLogGcCountLimit = 10
 	cluster := NewTestCluster(3, cfg)

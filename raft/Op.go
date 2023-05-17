@@ -40,6 +40,8 @@ func (r *Raft) Step(m pb.Message) error {
 		} else {
 			r.send(r.NewRespVoteMsg(m.From, true))
 		}
+	case pb.MessageType_MsgSnapshot:
+		r.handleSnapshot(m)
 	case pb.MessageType_MsgBeat:
 		if r.State == StateLeader {
 			r.bckstHeart()

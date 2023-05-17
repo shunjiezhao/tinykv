@@ -206,11 +206,9 @@ func newRaft(c *Config) *Raft {
 	raft.reset(state.Term)
 	raft.Vote = state.Vote
 	raft.peers = c.peers
-	raft.RaftLog.applied = c.Applied
-	//if len(cfg.Nodes) != 0 {
-	//	raft.peers = cfg.Nodes
-	//}
-	raft.peers = cfg.Nodes
+	if len(cfg.Nodes) != 0 {
+		raft.peers = cfg.Nodes
+	}
 	raft.resetPrs()
 
 	fmt.Printf("New Raft %+v\n", raft)
@@ -402,7 +400,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	prevLog, err := r.RaftLog.entryAt(m.Index)
 	if err != nil { // don't match may be i'm compact or exceed
 		reject = true
-		if errors.Is(err, LogIsCompacted) {
+		if errors.Is(err, ErrCompacted) {
 			index = r.RaftLog.committed
 			reject = false // the log is consistency is quarom,but is snapshot, leader can send snapshot
 		}
@@ -458,6 +456,36 @@ func (r *Raft) handleProse(m pb.Message) {
 }
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
+	if m.Snapshot == nil || m.Snapshot.Metadata == nil {
+		log.Panicf("recv snapshot is nil")
+	}
+	snapShot := m.Snapshot
+	index, term := snapShot.Metadata.Index, snapShot.Metadata.Term
+	if index < r.RaftLog.First() {
+		log.Debugf("handleSnapshot %s ignore snapshot %d < %d", r.info(), index, r.RaftLog.First())
+		return
+	}
+	r.RaftLog.pendingSnapshot = snapShot
+
+	if snapShot.Metadata.ConfState != nil {
+		newPeers := snapShot.Metadata.ConfState.Nodes
+		prs := make(map[uint64]*Progress)
+		for _, id := range newPeers {
+			if pr, ok := r.Prs[id]; ok {
+				prs[id] = pr
+			} else {
+				prs[id] = &Progress{
+					Match: 0,
+					Next:  r.RaftLog.LastIndex(),
+				}
+			}
+		}
+		r.peers = newPeers
+		r.Prs = prs
+	}
+
+	r.RaftLog.cutDown(index, term)
+	log.Infof("%s cut down log to %d", r.info(), index)
 }
 
 // addNode add a new node to raft group

@@ -100,9 +100,14 @@ func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, w *engine_
 	case raft_cmdpb.AdminCmdType_CompactLog:
 		index, term := req.GetCompactLog().GetCompactIndex(), req.GetCompactLog().GetCompactTerm()
 		if index < d.RaftGroup.Raft.RaftLog.First() {
-			log.Debug("compact index less than first index")
+			log.Warn("compact index less than first index")
 			return
 		}
+		d.peerStorage.applyState.TruncatedState = &rspb.RaftTruncatedState{
+			Index: index,
+			Term:  term,
+		}
+		d.ScheduleCompactLog(index)
 
 	default:
 		log.Panicf("unknown admin cmd type %v", req.CmdType)

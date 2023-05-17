@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"errors"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -55,6 +56,23 @@ func (r *Raft) NewAppendMsg(to uint64) pb.Message {
 	prevLog, err := r.RaftLog.entryAt(pr.Next - 1)
 
 	if err != nil {
+		if errors.Is(err, ErrCompacted) {
+			log.Infof("%s send to %d {%d:%d} compacted", r.info(), to, pr.Next, r.RaftLog.LastIndex())
+			storage := r.RaftLog.storage
+			snapshot, err := storage.Snapshot()
+			if err != nil {
+				if errors.Is(err, ErrSnapshotTemporarilyUnavailable) {
+					log.Errorf("%s send to %d {%d:%d} snapshot temporarily unavailable", r.info(), to, pr.Next, r.RaftLog.LastIndex())
+					return r.NewHeartbeatMsg(to)
+				}
+				log.Panicf("%s send to %d {%d:%d} snapshot error %s", r.info(), to, pr.Next, r.RaftLog.LastIndex(), err)
+			}
+			return pb.Message{
+				MsgType:  pb.MessageType_MsgSnapshot,
+				To:       to,
+				Snapshot: &snapshot,
+			}
+		}
 		// todo: send snap?
 		log.Panic(r.info(), "send to ", to, " can not get next ", err)
 	}

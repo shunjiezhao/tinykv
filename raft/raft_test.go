@@ -1010,6 +1010,7 @@ func TestLeaderIncreaseNext2AB(t *testing.T) {
 }
 
 func TestRestoreSnapshot2C(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	s := pb.Snapshot{
 		Metadata: &pb.SnapshotMetadata{
 			Index:     11, // magic number

@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
-	"github.com/pkg/errors"
 )
 
 // RaftLog manage the log entries, its struct look like:
@@ -154,11 +153,6 @@ func (l *RaftLog) LastLog() pb.Entry {
 	return l.entries[len(l.entries)-1]
 }
 
-var (
-	LogIsCompacted = errors.New("LogIsCompacted") // stand in snapshot
-	LogNotExist    = errors.New("LogNotExist")    // stand > lastLogIndex
-)
-
 // if not in [First,LastLogIndex] return nil
 func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
 	if index == l.start {
@@ -166,10 +160,10 @@ func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
 	}
 
 	if index < l.First() { // is compact
-		return nil, LogIsCompacted
+		return nil, ErrCompacted
 	}
 	if index > l.LastIndex() { // exceed
-		return nil, LogNotExist
+		return nil, ErrUnavailable
 	}
 
 	//[First,Last]
@@ -225,17 +219,23 @@ func (l *RaftLog) updateCommitIndex(commit uint64) {
 }
 
 // cutDown cut down the log entries to (index,LastLogIndex]
-func (l *RaftLog) cutDown(index uint64) {
+func (l *RaftLog) cutDown(index, term uint64) {
+	var cp []pb.Entry
 	if index > l.LastIndex() {
-		log.Panicf("cutDown: index(%d) > LastIndex(%d)", index, l.LastIndex())
+		log.Warnf("cutDown: index(%d) > LastIndex(%d)", index, l.LastIndex())
+		cp = make([]pb.Entry, 1)
+	} else {
+		cp = make([]pb.Entry, l.LastIndex()-index-l.start+1)
+		log.Infof("cut down: %d, %d, %d, %d", index, l.LastIndex(), len(l.entries), len(cp))
 	}
-
-	cp := make([]pb.Entry, l.LastIndex()-index+1)
-	cp[0].Term, cp[0].Index = l.entries[len(l.entries)-1].Term, l.entries[len(l.entries)-1].Index
-	log.Warnf("cut down: %d, %d, %d, %d", index, l.LastIndex(), len(l.entries), len(cp))
+	cp[0].Index, cp[0].Term = index, term
 	if index+1 < l.LastIndex() {
 		copy(cp[1:], l.entries[index+1:])
 	}
 	l.entries = cp
 	l.start = index
+
+	l.committed = max(l.committed, index)
+	l.applied = max(l.applied, index)
+	l.stabled = max(l.stabled, index)
 }

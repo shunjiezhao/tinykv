@@ -175,6 +175,11 @@ func (rn *RawNode) Ready() Ready {
 			RaftState: rn.Raft.State,
 		}
 	}
+
+	if rn.Raft.RaftLog.pendingSnapshot != nil {
+		r.Snapshot = *rn.Raft.RaftLog.pendingSnapshot
+	}
+
 	if rn.hardState.Vote != rn.Raft.Vote || rn.hardState.Term != rn.Raft.Term || rn.hardState.Commit != rn.Raft.RaftLog.committed {
 		r.HardState = pb.HardState{
 			Term:   rn.Raft.Term,
@@ -194,7 +199,10 @@ func (rn *RawNode) HasReady() bool {
 
 	if len(rn.Raft.RaftLog.nextEnts()) != 0 { // 应用
 		return true
+	}
 
+	if rn.Raft.RaftLog.pendingSnapshot != nil { // 快照
+		return true
 	}
 
 	if len(rn.Raft.msgs) != 0 { // 发送
