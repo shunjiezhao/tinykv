@@ -261,7 +261,7 @@ func (ps *PeerStorage) clearExtraData(newRegion *metapb.Region) {
 	if bytes.Compare(oldStartKey, newStartKey) < 0 {
 		ps.clearRange(newRegion.Id, oldStartKey, newStartKey)
 	}
-	if bytes.Compare(newEndKey, oldEndKey) < 0 || (len(oldEndKey) == 0 && len(newEndKey) != 0) {
+	if bytes.Compare(newEndKey, oldEndKey) < 0 {
 		ps.clearRange(newRegion.Id, newEndKey, oldEndKey)
 	}
 }
@@ -308,12 +308,6 @@ func ClearMeta(engines *engine_util.Engines, kvWB, raftWB *engine_util.WriteBatc
 // never be committed
 func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.WriteBatch) error {
 	// Your Code Here (2B).
-	for i := range entries {
-		mustNil(raftWB.SetMeta(meta.RaftLogKey(ps.region.Id, entries[i].Index), &entries[i]))
-	}
-	ps.raftState.LastIndex = max(entries[len(entries)-1].Index, ps.raftState.LastIndex)
-	ps.raftState.LastTerm = max(entries[len(entries)-1].Index, ps.raftState.LastTerm)
-	log.Warnf("%v append raft lastIndex: %d LastTerm: %d", ps.Tag, ps.raftState.LastIndex, ps.raftState.LastTerm)
 	return nil
 }
 
@@ -337,21 +331,7 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, error) {
 	// Hint: you may call `Append()` and `ApplySnapshot()` in this function
 	// Your Code Here (2B/2C).
-	var resp ApplySnapResult
-	resp.Region = ps.region
-	// 1. append
-	w := new(engine_util.WriteBatch)
-	if len(ready.Entries) > 0 {
-		mustNil(ps.Append(ready.Entries, w))
-	}
-
-	// local state
-	if !raft.IsEmptyHardState(ready.HardState) {
-		ps.raftState.HardState = &ready.HardState
-	}
-	mustNil(w.SetMeta(meta.RaftStateKey(ps.region.Id), ps.raftState))
-	w.MustWriteToDB(ps.Engines.Raft)
-	return &resp, nil
+	return nil, nil
 }
 
 func (ps *PeerStorage) ClearData() {
@@ -364,18 +344,4 @@ func (ps *PeerStorage) clearRange(regionID uint64, start, end []byte) {
 		StartKey: start,
 		EndKey:   end,
 	}
-}
-
-func mustNil(err error) {
-	if err != nil {
-		log.Panic(err)
-	}
-
-}
-
-func max(a, b uint64) uint64 {
-	if a > b {
-		return a
-	}
-	return b
 }

@@ -13,7 +13,6 @@ import (
 	"log"
 	"os"
 	"runtime"
-	"strings"
 )
 
 const (
@@ -168,7 +167,6 @@ func (l *Logger) log(t LogType, v ...interface{}) {
 }
 
 func (l *Logger) logf(t LogType, format string, v ...interface{}) {
-	return
 	if l.level|LogLevel(t) != l.level {
 		return
 	}
@@ -234,7 +232,6 @@ func (l *Logger) Infof(format string, v ...interface{}) {
 }
 
 func StringToLogLevel(level string) LogLevel {
-	level = strings.ToLower(level)
 	switch level {
 	case "fatal":
 		return LOG_LEVEL_FATAL

@@ -19,7 +19,7 @@ var _ tinykvpb.TinyKvServer = new(Server)
 type Server struct {
 	storage storage.Storage
 
-	// (Used in 4B)
+	// (Used in 4A/4B)
 	Latches *latches.Latches
 
 	// coprocessor API handler, out of course scope
@@ -34,6 +34,27 @@ func NewServer(storage storage.Storage) *Server {
 }
 
 // The below functions are Server's gRPC API (implements TinyKvServer).
+
+// Raw API.
+func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (*kvrpcpb.RawGetResponse, error) {
+	// Your Code Here (1).
+	return nil, nil
+}
+
+func (server *Server) RawPut(_ context.Context, req *kvrpcpb.RawPutRequest) (*kvrpcpb.RawPutResponse, error) {
+	// Your Code Here (1).
+	return nil, nil
+}
+
+func (server *Server) RawDelete(_ context.Context, req *kvrpcpb.RawDeleteRequest) (*kvrpcpb.RawDeleteResponse, error) {
+	// Your Code Here (1).
+	return nil, nil
+}
+
+func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*kvrpcpb.RawScanResponse, error) {
+	// Your Code Here (1).
+	return nil, nil
+}
 
 // Raft commands (tinykv <-> tinykv)
 // Only used for RaftStorage, so trivially forward it.

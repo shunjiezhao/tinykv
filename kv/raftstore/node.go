@@ -206,7 +206,3 @@ func (n *Node) Stop() {
 func (n *Node) GetStoreID() uint64 {
 	return n.store.GetId()
 }
-
-func (n *Node) GetDBPath() string {
-	return n.cfg.DBPath
-}

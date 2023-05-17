@@ -26,37 +26,6 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
-func covEntry2PtrC(es ...pb.Entry) []*pb.Entry {
-	var ans = make([]*pb.Entry, len(es))
-	for i := range es {
-		ans[i] = &pb.Entry{
-			EntryType:            es[i].EntryType,
-			Term:                 es[i].Term,
-			Index:                es[i].Index,
-			Data:                 es[i].Data,
-			XXX_NoUnkeyedLiteral: es[i].XXX_NoUnkeyedLiteral,
-			XXX_unrecognized:     es[i].XXX_unrecognized,
-			XXX_sizecache:        es[i].XXX_sizecache,
-		}
-	}
-	return ans
-}
-func covEntry2StructC(es ...*pb.Entry) []pb.Entry {
-	var ans = make([]pb.Entry, len(es))
-	for i := range es {
-		ans[i] = pb.Entry{
-			EntryType:            es[i].EntryType,
-			Term:                 es[i].Term,
-			Index:                es[i].Index,
-			Data:                 es[i].Data,
-			XXX_NoUnkeyedLiteral: es[i].XXX_NoUnkeyedLiteral,
-			XXX_unrecognized:     es[i].XXX_unrecognized,
-			XXX_sizecache:        es[i].XXX_sizecache,
-		}
-	}
-	return ans
-}
-
 func min(a, b uint64) uint64 {
 	if a > b {
 		return b
@@ -157,48 +126,4 @@ func IsResponseMsg(msgt pb.MessageType) bool {
 
 func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
-}
-
-func MessageStr(r *Raft, m pb.Message) string {
-	switch m.MsgType {
-	case pb.MessageType_MsgHup:
-		return fmt.Sprintf("[HUP] send")
-	case pb.MessageType_MsgPropose:
-		return fmt.Sprintf("[Propose] entriesLen: %d", len(m.Entries))
-	case pb.MessageType_MsgRequestVote:
-		return fmt.Sprintf("[RequestVote] {From: %v Term:%v LogTerm:%v}  Commit: %v to %v", m.From,
-			m.Term, m.LogTerm, r.RaftLog.committed,
-			m.To)
-
-	case pb.MessageType_MsgRequestVoteResponse:
-		return fmt.Sprintf("[RequestVoteResponse]  {Commit: %v} {%v -> %v} {Reject: %v}", r.RaftLog.committed, m.From, m.To, m.Reject)
-	case pb.MessageType_MsgHeartbeat:
-		return fmt.Sprintf("[HeartBeat] {Commit: %v}{to %v}", r.RaftLog.committed, m.To)
-	case pb.MessageType_MsgHeartbeatResponse:
-		return fmt.Sprintf("[HeartBeatResponse] {Commit: %v}{to %v}", r.RaftLog.committed, m.To)
-	case pb.MessageType_MsgAppend:
-		if len(m.Entries) != 0 {
-			return fmt.Sprintf("[Append] to %d PrevInfo:{%v:%v} entries:{start: %v end: %v}", m.To, m.Index, m.LogTerm,
-				m.Entries[0].Index, m.Entries[len(m.Entries)-1].Index)
-		}
-		return fmt.Sprintf("[Append] PrevInfo:{%v:%v}", m.Index, m.LogTerm)
-
-	case pb.MessageType_MsgAppendResponse:
-		return fmt.Sprintf("[AppendRespons] {Commit: %v} {Reject: %v} %v to %v", r.RaftLog.committed, m.Reject, m.From, m.To)
-
-	}
-	return m.String()
-}
-
-func (r *Raft) info() string {
-	return fmt.Sprintf("{%x:%s:%d} ", r.id, r.State, r.Term)
-}
-func mustBeNil(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
-func EntryStr(m pb.Entry) string {
-	return fmt.Sprintf("{%v:%v}", m.Index, m.Term)
 }

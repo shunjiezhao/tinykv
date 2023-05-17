@@ -2,10 +2,6 @@ package raftstore
 
 import (
 	"fmt"
-	"github.com/Connor1996/badger"
-	"github.com/pingcap-incubator/tinykv/kv/raftstore/meta"
-	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
-	"github.com/pingcap-incubator/tinykv/raft"
 	"time"
 
 	"github.com/Connor1996/badger/y"
@@ -32,8 +28,7 @@ const (
 
 type peerMsgHandler struct {
 	*peer
-	ctx  *GlobalContext
-	pros []*proposal
+	ctx *GlobalContext
 }
 
 func newPeerMsgHandler(peer *peer, ctx *GlobalContext) *peerMsgHandler {
@@ -47,107 +42,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	if d.stopped {
 		return
 	}
-
-	if !d.RaftGroup.HasReady() {
-		return
-	}
-
 	// Your Code Here (2B).
-	ready := d.RaftGroup.Ready()
-	if raft.IsEmptySnap(&ready.Snapshot) == false {
-		log.Infof("can't handle snapshot")
-	}
-
-	_, _ = d.peer.peerStorage.SaveReadyState(&ready)
-	d.Send(d.ctx.trans, ready.Messages)
-	var proposals []*proposal
-	var resp []*raft_cmdpb.Response
-
-	if len(ready.CommittedEntries) > 0 {
-		w := new(engine_util.WriteBatch)
-		db := d.peerStorage.Engines.Kv
-		for _, en := range ready.CommittedEntries {
-			request := raft_cmdpb.RaftCmdRequest{}
-			mustNil(request.Unmarshal(en.Data))
-			pro := d.findPro(en.Index, en.Term)
-			if len(request.Requests) == 0 {
-				d.handleAdminReq(request.AdminRequest, w, db)
-			} else {
-				resp = append(resp, d.handleReq(pro, &request, w, db))
-			}
-			proposals = append(proposals, pro)
-		}
-
-		d.peerStorage.applyState.AppliedIndex = ready.CommittedEntries[len(ready.CommittedEntries)-1].Index
-		mustNil(w.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState))
-		w.MustWriteToDB(db)
-	}
-
-	for i, pro := range proposals {
-		if pro != nil {
-			pro.cb.Done(&raft_cmdpb.RaftCmdResponse{
-				Header:    &raft_cmdpb.RaftResponseHeader{CurrentTerm: d.Term()},
-				Responses: []*raft_cmdpb.Response{resp[i]},
-			})
-		}
-	}
-	d.proposals = []*proposal{} // clear proposals
-	d.RaftGroup.Advance(ready)
-}
-
-func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, w *engine_util.WriteBatch, db *badger.DB) {
-	switch req.CmdType {
-	case raft_cmdpb.AdminCmdType_CompactLog:
-		index, term := req.GetCompactLog().GetCompactIndex(), req.GetCompactLog().GetCompactTerm()
-		if index < d.RaftGroup.Raft.RaftLog.First() {
-			log.Debug("compact index less than first index")
-			return
-		}
-
-	default:
-		log.Panicf("unknown admin cmd type %v", req.CmdType)
-	}
-
-}
-
-func (d *peerMsgHandler) handleReq(pro *proposal, request *raft_cmdpb.RaftCmdRequest, w *engine_util.WriteBatch, db *badger.DB) *raft_cmdpb.Response {
-	if len(request.Requests) != 1 {
-		log.Panicf("len(request.Requests) != 1 %d", len(request.Requests))
-	}
-	req := request.Requests[0]
-	var res raft_cmdpb.Response
-	res.CmdType = req.CmdType
-	switch req.CmdType {
-	case raft_cmdpb.CmdType_Get:
-		val, err := engine_util.GetCF(db, req.Get.Cf, req.Get.Key)
-		mustNil(err)
-		res.Get = &raft_cmdpb.GetResponse{
-			Value: val,
-		}
-	case raft_cmdpb.CmdType_Put:
-		w.SetCF(req.GetPut().GetCf(), req.GetPut().Key, req.GetPut().Value)
-		res.Put = &raft_cmdpb.PutResponse{}
-	case raft_cmdpb.CmdType_Delete:
-		w.DeleteCF(req.Delete.Cf, req.Delete.Key)
-		res.Delete = &raft_cmdpb.DeleteResponse{}
-	case raft_cmdpb.CmdType_Snap:
-		log.Debug("snap")
-		res.Snap = &raft_cmdpb.SnapResponse{Region: d.Region()}
-		if pro != nil {
-			pro.cb.Txn = d.peerStorage.Engines.Kv.NewTransaction(false)
-		}
-	}
-	res.CmdType = req.CmdType
-	return &res
-
-}
-func (d *peerMsgHandler) findPro(index, term uint64) *proposal {
-	for _, p := range d.proposals {
-		if p.index == index && p.term == term {
-			return p
-		}
-	}
-	return nil
 }
 
 func (d *peerMsgHandler) HandleMsg(msg message.Msg) {
@@ -219,24 +114,6 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 		return
 	}
 	// Your Code Here (2B).
-	data, err := msg.Marshal()
-	if err != nil {
-		panic(err)
-	}
-	var pro proposal
-	pro.cb = cb
-	pro.term = d.Term()
-	pro.index = d.nextProposalIndex()
-	for {
-		err := d.peer.RaftGroup.Propose(data)
-		if err == nil {
-			break
-		}
-		if err == raft.ErrProposalDropped {
-			continue
-		}
-	}
-	d.proposals = append(d.proposals, &pro)
 }
 
 func (d *peerMsgHandler) onTick() {
@@ -346,9 +223,9 @@ func (d *peerMsgHandler) validateRaftMessage(msg *rspb.RaftMessage) bool {
 	return true
 }
 
-// / Checks if the message is sent to the correct peer.
-// /
-// / Returns true means that the message can be dropped silently.
+/// Checks if the message is sent to the correct peer.
+///
+/// Returns true means that the message can be dropped silently.
 func (d *peerMsgHandler) checkMessage(msg *rspb.RaftMessage) bool {
 	fromEpoch := msg.GetRegionEpoch()
 	isVoteMsg := util.IsVoteMessage(msg.Message)

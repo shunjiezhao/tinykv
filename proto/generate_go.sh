@@ -19,16 +19,18 @@ cmd_exists () {
 
 PROGRAM=$(basename "$0")
 
-if [ -z $(go env GOPATH) ]; then
+if [ -z $GOPATH ]; then
     printf "Error: the environment variable GOPATH is not set, please set it before running %s\n" $PROGRAM > /dev/stderr
     exit 1
 fi
-GOPATH=$(go env GOPATH)
+
 GO_PREFIX_PATH=github.com/pingcap-incubator/tinykv/proto/pkg
-export PATH=$(pwd)/tools/bin:$GOPATH/bin:$PATH
+export PATH=$(pwd)/_tools/bin:$GOPATH/bin:$PATH
 
 echo "install tools..."
-cd tools && make && cd ..
+GO111MODULE=off go get github.com/twitchtv/retool
+# Ensure we're using the right versions of our tools (see tools.json).
+GO111MODULE=off retool -base-dir=$(pwd) sync || exit 1
 
 function collect() {
     file=$(basename $1)

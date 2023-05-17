@@ -38,14 +38,11 @@ func (en *Engines) WriteRaft(wb *WriteBatch) error {
 }
 
 func (en *Engines) Close() error {
-	dbs := []*badger.DB{en.Kv, en.Raft}
-	for _, db := range dbs {
-		if db == nil {
-			continue
-		}
-		if err := db.Close(); err != nil {
-			return err
-		}
+	if err := en.Kv.Close(); err != nil {
+		return err
+	}
+	if err := en.Raft.Close(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -63,7 +60,7 @@ func (en *Engines) Destroy() error {
 	return nil
 }
 
-// CreateDB creates a new Badger DB on disk at path.
+// CreateDB creates a new Badger DB on disk at subPath.
 func CreateDB(path string, raft bool) *badger.DB {
 	opts := badger.DefaultOptions
 	if raft {

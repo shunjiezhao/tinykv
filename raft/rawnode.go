@@ -16,9 +16,8 @@ package raft
 
 import (
 	"errors"
-	"github.com/pingcap-incubator/tinykv/log"
+
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
-	"time"
 )
 
 // ErrStepLocalMsg is returned when try to step a local raft message
@@ -70,33 +69,13 @@ type Ready struct {
 // RawNode is a wrapper of Raft.
 type RawNode struct {
 	Raft *Raft
-
 	// Your Data Here (2A).
-	done      chan struct{}
-	ticker    *time.Ticker
-	hardState pb.HardState
-	softState *SoftState
 }
-
-var TickerInterval = 75 * time.Millisecond
 
 // NewRawNode returns a new RawNode given configuration and a list of raft peers.
 func NewRawNode(config *Config) (*RawNode, error) {
 	// Your Code Here (2A).
-	node := &RawNode{}
-	node.Raft = newRaft(config)
-	node.ticker = time.NewTicker(TickerInterval)
-	node.hardState = pb.HardState{
-		Term:   node.Raft.Term,
-		Vote:   node.Raft.Vote,
-		Commit: node.Raft.RaftLog.committed,
-	}
-
-	node.softState = &SoftState{
-		Lead:      node.Raft.Lead,
-		RaftState: node.Raft.State,
-	}
-	return node, nil
+	return nil, nil
 }
 
 // Tick advances the internal logical clock by a single tick.
@@ -163,49 +142,13 @@ func (rn *RawNode) Step(m pb.Message) error {
 
 // Ready returns the current point-in-time state of this RawNode.
 func (rn *RawNode) Ready() Ready {
-	r := Ready{
-		Entries:          rn.Raft.RaftLog.unstableEntries(),
-		CommittedEntries: rn.Raft.RaftLog.nextEnts(),
-		Messages:         rn.Raft.msgs,
-	}
-
-	if rn.softState.RaftState != rn.Raft.State {
-		r.SoftState = &SoftState{
-			Lead:      rn.Raft.Lead,
-			RaftState: rn.Raft.State,
-		}
-	}
-	if rn.hardState.Vote != rn.Raft.Vote || rn.hardState.Term != rn.Raft.Term || rn.hardState.Commit != rn.Raft.RaftLog.committed {
-		r.HardState = pb.HardState{
-			Term:   rn.Raft.Term,
-			Vote:   rn.Raft.Vote,
-			Commit: rn.Raft.RaftLog.committed,
-		}
-	}
-	return r
+	// Your Code Here (2A).
+	return Ready{}
 }
 
 // HasReady called when RawNode user need to check if any Ready pending.
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
-	if len(rn.Raft.RaftLog.unstableEntries()) != 0 { // 追加的日志代持久化持久化
-		return true
-	}
-
-	if len(rn.Raft.RaftLog.nextEnts()) != 0 { // 应用
-		return true
-
-	}
-
-	if len(rn.Raft.msgs) != 0 { // 发送
-		return true
-	}
-
-	// 检查是否有term,vote变化
-	if rn.hardState.Term != rn.Raft.Term || rn.hardState.Vote != rn.Raft.Vote {
-		return true
-	}
-
 	return false
 }
 
@@ -213,21 +156,9 @@ func (rn *RawNode) HasReady() bool {
 // last Ready results.
 func (rn *RawNode) Advance(rd Ready) {
 	// Your Code Here (2A).
-	if rd.HardState.Commit > rn.hardState.Commit || rd.HardState.Term > rn.hardState.Term || rd.HardState.Vote > rn.hardState.Vote {
-		rn.hardState = rd.HardState
-	}
-
-	rLog := rn.Raft.RaftLog
-	rLog.applied = max(rn.hardState.Commit, rLog.applied)
-	log.Debugf("Ready: Update applied to %d", rLog.applied)
-	if len(rd.Entries) > 0 {
-		rLog.stabled = max(rLog.stabled, rd.Entries[len(rd.Entries)-1].Index)
-	}
-	rn.Raft.msgs = nil
-	log.Debugf("advance 1")
 }
 
-// GetProgress return the Progress of this node and its peers, if this
+// GetProgress return the the Progress of this node and its peers, if this
 // node is leader.
 func (rn *RawNode) GetProgress() map[uint64]Progress {
 	prs := make(map[uint64]Progress)

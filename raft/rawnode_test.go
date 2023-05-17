@@ -16,7 +16,6 @@ package raft
 
 import (
 	"bytes"
-	"github.com/pingcap-incubator/tinykv/log"
 	"reflect"
 	"testing"
 
@@ -159,7 +158,6 @@ func TestRawNodeProposeAddDuplicateNode3A(t *testing.T) {
 // TestRawNodeStart ensures that a node can be started correctly, and can accept and commit
 // proposals.
 func TestRawNodeStart2AC(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
 	storage := NewMemoryStorage()
 	rawNode, err := NewRawNode(newTestConfig(1, []uint64{1}, 10, 1, storage))
 	if err != nil {
@@ -167,7 +165,6 @@ func TestRawNodeStart2AC(t *testing.T) {
 	}
 	rawNode.Campaign()
 	rd := rawNode.Ready()
-	log.Errorf("rd: %+v", rd)
 	storage.Append(rd.Entries)
 	rawNode.Advance(rd)
 
@@ -209,7 +206,7 @@ func TestRawNodeRestart2AC(t *testing.T) {
 	}
 	rd := rawNode.Ready()
 	if !reflect.DeepEqual(rd, want) {
-		t.Errorf("g = \n%#v,\n             w   \n%#v", rd, want)
+		t.Errorf("g = %+v,\n             w   %+v", rd, want)
 	}
 	rawNode.Advance(rd)
 	if rawNode.HasReady() {
@@ -245,7 +242,7 @@ func TestRawNodeRestartFromSnapshot2C(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rd := rawNode.Ready(); !reflect.DeepEqual(rd, want) {
-		t.Errorf("g = %#v,\n             w   %#v", rd, want)
+		t.Errorf("g = %+v,\n             w   %+v", rd, want)
 	} else {
 		rawNode.Advance(rd)
 	}

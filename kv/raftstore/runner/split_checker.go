@@ -37,7 +37,7 @@ func NewSplitCheckHandler(engine *badger.DB, router message.RaftRouter, conf *co
 func (r *splitCheckHandler) Handle(t worker.Task) {
 	spCheckTask, ok := t.(*SplitCheckTask)
 	if !ok {
-		log.Errorf("unsupported worker.Task: %+v", t)
+		log.Error("unsupported worker.Task: %+v", t)
 		return
 	}
 	region := spCheckTask.Region

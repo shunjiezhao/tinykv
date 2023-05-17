@@ -69,7 +69,7 @@ func (sw *storeWorker) run(closeCh <-chan struct{}, wg *sync.WaitGroup) {
 func (d *storeWorker) onTick(tick StoreTick) {
 	switch tick {
 	case StoreTickSchedulerStoreHeartbeat:
-		d.onSchedulerStoreHeartbeatTick()
+		d.onSchedulerStoreHearbeatTick()
 	case StoreTickSnapGC:
 		d.onSnapMgrGC()
 	}
@@ -244,7 +244,7 @@ func (d *storeWorker) storeHeartbeatScheduler() {
 	}
 }
 
-func (d *storeWorker) onSchedulerStoreHeartbeatTick() {
+func (d *storeWorker) onSchedulerStoreHearbeatTick() {
 	d.storeHeartbeatScheduler()
 	d.ticker.scheduleStore(StoreTickSchedulerStoreHeartbeat)
 }

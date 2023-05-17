@@ -17,7 +17,6 @@ package raft
 import (
 	"bytes"
 	"fmt"
-	"github.com/pingcap-incubator/tinykv/log"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -57,7 +56,6 @@ func (r *Raft) readMessages() []pb.Message {
 }
 
 func TestProgressLeader2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
 	r := newTestRaft(1, []uint64{1, 2}, 5, 1, NewMemoryStorage())
 	r.becomeCandidate()
 	r.becomeLeader()
@@ -66,7 +64,7 @@ func TestProgressLeader2AB(t *testing.T) {
 	propMsg := pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("foo")}}}
 	for i := 0; i < 5; i++ {
 		if pr := r.Prs[r.id]; pr.Match != uint64(i+1) || pr.Next != pr.Match+1 {
-			t.Errorf("%v: unexpected progress %+v", i, pr)
+			t.Errorf("unexpected progress %v", pr)
 		}
 		if err := r.Step(propMsg); err != nil {
 			t.Fatalf("proposal resulted in error: %v", err)
@@ -146,11 +144,11 @@ func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
 	// the case where older log entries are overwritten, so this test
 	// focuses on the case where the newer entries are lost).
 	n := newNetworkWithConfig(cfg,
-		entsWithConfig(cfg, 1, 1),     // Node 1: Won first election
-		entsWithConfig(cfg, 2, 1),     // Node 2: Got logs from node 1
-		entsWithConfig(cfg, 3, 2),     // Node 3: Won second election
-		votedWithConfig(cfg, 4, 3, 2), // Node 4: Voted but didn't get logs
-		votedWithConfig(cfg, 5, 3, 2)) // Node 5: Voted but didn't get logs
+		entsWithConfig(cfg, 1),     // Node 1: Won first election
+		entsWithConfig(cfg, 1),     // Node 2: Got logs from node 1
+		entsWithConfig(cfg, 2),     // Node 3: Won second election
+		votedWithConfig(cfg, 3, 2), // Node 4: Voted but didn't get logs
+		votedWithConfig(cfg, 3, 2)) // Node 5: Voted but didn't get logs
 
 	// Node 1 campaigns. The election fails because a quorum of nodes
 	// know about the election that already happened at term 2. Node 1's
@@ -177,7 +175,7 @@ func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
 	// term 3 at index 2).
 	for i := range n.peers {
 		sm := n.peers[i].(*Raft)
-		entries := sm.RaftLog.allEntries()
+		entries := sm.RaftLog.entries
 		if len(entries) != 2 {
 			t.Fatalf("node %d: len(entries) == %d, want 2", i, len(entries))
 		}
@@ -266,7 +264,7 @@ func TestLogReplication2AB(t *testing.T) {
 			newNetwork(nil, nil, nil),
 			[]pb.Message{
 				{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("somedata")}}},
-				{From: 2, To: 2, MsgType: pb.MessageType_MsgHup},
+				{From: 1, To: 2, MsgType: pb.MessageType_MsgHup},
 				{From: 1, To: 2, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("somedata")}}},
 			},
 			4,
@@ -304,13 +302,11 @@ func TestLogReplication2AB(t *testing.T) {
 					t.Errorf("#%d.%d: data = %d, want %d", i, j, ents[k].Data, m.Entries[0].Data)
 				}
 			}
-			log.Debugf("\n\n\n")
 		}
 	}
 }
 
 func TestSingleNodeCommit2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
 	tt := newNetwork(nil)
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("some data")}}})
@@ -374,7 +370,7 @@ func TestCommitWithHeartbeat2AB(t *testing.T) {
 	// network recovery
 	tt.recover()
 
-	// leader broadcast heartbeat
+	// leader broadcast heartbeeat
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgBeat})
 
 	if sm.RaftLog.committed != 3 {
@@ -441,9 +437,7 @@ func TestDuelingCandidates2AB(t *testing.T) {
 		} else {
 			t.Logf("#%d: empty log", i)
 		}
-		t.Log("\n\n\n")
 	}
-
 }
 
 func TestCandidateConcede2AB(t *testing.T) {
@@ -508,11 +502,13 @@ func TestOldMessages2AB(t *testing.T) {
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("somedata")}}})
 
 	ilog := newLog(
-		newMemoryStorageWithEnts([]pb.Entry{
-			{}, {Data: nil, Term: 1, Index: 1},
-			{Data: nil, Term: 2, Index: 2}, {Data: nil, Term: 3, Index: 3},
-			{Data: []byte("somedata"), Term: 3, Index: 4},
-		}))
+		&MemoryStorage{
+			ents: []pb.Entry{
+				{}, {Data: nil, Term: 1, Index: 1},
+				{Data: nil, Term: 2, Index: 2}, {Data: nil, Term: 3, Index: 3},
+				{Data: []byte("somedata"), Term: 3, Index: 4},
+			},
+		})
 	ilog.committed = 4
 	base := ltoa(ilog)
 	for i, p := range tt.peers {
@@ -539,7 +535,7 @@ func TestProposal2AB(t *testing.T) {
 		{newNetwork(nil, nopStepper, nopStepper, nil, nil), true},
 	}
 
-	for i, tt := range tests {
+	for j, tt := range tests {
 		data := []byte("somedata")
 
 		// promote 1 to become leader
@@ -552,26 +548,28 @@ func TestProposal2AB(t *testing.T) {
 			wantLog.committed = 2
 		}
 		base := ltoa(wantLog)
-		for j, p := range tt.peers {
+		for i, p := range tt.peers {
 			if sm, ok := p.(*Raft); ok {
 				l := ltoa(sm.RaftLog)
 				if g := diffu(base, l); g != "" {
-					t.Errorf("#%d.%d: diff:\n%s", i, j, g)
+					t.Errorf("#%d: diff:\n%s", i, g)
 				}
+			} else {
+				t.Logf("#%d: empty log", i)
 			}
 		}
 		sm := tt.network.peers[1].(*Raft)
 		if g := sm.Term; g != 1 {
-			t.Errorf("#%d: term = %d, want %d", i, g, 1)
+			t.Errorf("#%d: term = %d, want %d", j, g, 1)
 		}
 	}
 }
 
 // TestHandleMessageType_MsgAppend ensures:
-//  1. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm.
-//  2. If an existing entry conflicts with a new one (same index but different terms),
-//     delete the existing entry and all that follow it; append any new entries not already in the log.
-//  3. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry).
+// 1. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm.
+// 2. If an existing entry conflicts with a new one (same index but different terms),
+//    delete the existing entry and all that follow it; append any new entries not already in the log.
+// 3. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry).
 func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 	tests := []struct {
 		m       pb.Message
@@ -580,8 +578,8 @@ func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 		wReject bool
 	}{
 		// Ensure 1
-		{pb.Message{MsgType: pb.MessageType_MsgAppend, Term: 3, LogTerm: 3, Index: 2, Commit: 3}, 2, 0, true}, // previous log mismatch
-		{pb.Message{MsgType: pb.MessageType_MsgAppend, Term: 3, LogTerm: 3, Index: 3, Commit: 3}, 2, 0, true}, // previous log non-exist
+		{pb.Message{MsgType: pb.MessageType_MsgAppend, Term: 2, LogTerm: 3, Index: 2, Commit: 3}, 2, 0, true}, // previous log mismatch
+		{pb.Message{MsgType: pb.MessageType_MsgAppend, Term: 2, LogTerm: 3, Index: 3, Commit: 3}, 2, 0, true}, // previous log non-exist
 
 		// Ensure 2
 		{pb.Message{MsgType: pb.MessageType_MsgAppend, Term: 2, LogTerm: 1, Index: 1, Commit: 1}, 2, 1, false},
@@ -604,7 +602,6 @@ func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 		sm.becomeFollower(2, None)
 
 		sm.handleAppendEntries(tt.m)
-		t.Log(i)
 		if sm.RaftLog.LastIndex() != tt.wIndex {
 			t.Errorf("#%d: lastIndex = %d, want %d", i, sm.RaftLog.LastIndex(), tt.wIndex)
 		}
@@ -618,11 +615,10 @@ func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 		if m[0].Reject != tt.wReject {
 			t.Errorf("#%d: reject = %v, want %v", i, m[0].Reject, tt.wReject)
 		}
-		log.Debugf("\n\n\n")
 	}
 }
 
-func TestRecvMessageType_MsgRequestVote2AB(t *testing.T) {
+func TestRecvMessageType_MsgRequestVote2AA(t *testing.T) {
 	msgType := pb.MessageType_MsgRequestVote
 	msgRespType := pb.MessageType_MsgRequestVoteResponse
 	tests := []struct {
@@ -741,8 +737,8 @@ func TestAllServerStepdown2AB(t *testing.T) {
 			if sm.RaftLog.LastIndex() != tt.windex {
 				t.Errorf("#%d.%d index = %v , want %v", i, j, sm.RaftLog.LastIndex(), tt.windex)
 			}
-			if uint64(len(sm.RaftLog.allEntries())) != tt.windex {
-				t.Errorf("#%d.%d len(ents) = %v , want %v", i, j, len(sm.RaftLog.allEntries()), tt.windex)
+			if uint64(len(sm.RaftLog.entries)) != tt.windex {
+				t.Errorf("#%d.%d len(ents) = %v , want %v", i, j, len(sm.RaftLog.entries), tt.windex)
 			}
 			wlead := uint64(2)
 			if msgType == pb.MessageType_MsgRequestVote {
@@ -910,7 +906,6 @@ func TestDisruptiveFollower2AA(t *testing.T) {
 }
 
 func TestHeartbeatUpdateCommit2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
 	tests := []struct {
 		failCnt    int
 		successCnt int
@@ -920,15 +915,12 @@ func TestHeartbeatUpdateCommit2AB(t *testing.T) {
 		{5, 10},
 	}
 	for i, tt := range tests {
-		t.Log(i)
 		sm1 := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-		sm2 := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-		sm3 := newTestRaft(3, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+		sm2 := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+		sm3 := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		nt := newNetwork(sm1, sm2, sm3)
 		nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
-		t.Log("send done")
 		nt.isolate(1)
-		t.Log("isolate 1")
 		// propose log to old leader should fail
 		for i := 0; i < tt.failCnt; i++ {
 			nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
@@ -936,7 +928,6 @@ func TestHeartbeatUpdateCommit2AB(t *testing.T) {
 		if sm1.RaftLog.committed > 1 {
 			t.Fatalf("#%d: unexpected commit: %d", i, sm1.RaftLog.committed)
 		}
-		t.Logf("\n\n\n")
 		// propose log to cluster should success
 		nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgHup})
 		for i := 0; i < tt.successCnt; i++ {
@@ -1104,35 +1095,6 @@ func TestRestoreFromSnapMsg2C(t *testing.T) {
 
 	if sm.Lead != uint64(1) {
 		t.Errorf("sm.Lead = %d, want 1", sm.Lead)
-	}
-}
-
-func TestRestoreFromSnapWithOverlapingPeersMsg2C(t *testing.T) {
-	s := pb.Snapshot{
-		Metadata: &pb.SnapshotMetadata{
-			Index:     11, // magic number
-			Term:      11, // magic number
-			ConfState: &pb.ConfState{Nodes: []uint64{2, 3, 4}},
-		},
-	}
-	m := pb.Message{MsgType: pb.MessageType_MsgSnapshot, From: 1, Term: 2, Snapshot: &s}
-
-	sm := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-	sm.Step(m)
-
-	if sm.Lead != uint64(1) {
-		t.Errorf("sm.Lead = %d, want 1", sm.Lead)
-	}
-
-	nodes := s.Metadata.ConfState.Nodes
-	if len(nodes) != len(sm.Prs) {
-		t.Errorf("len(sm.Prs) = %d, want %d", len(sm.Prs), len(nodes))
-	}
-
-	for _, p := range nodes {
-		if _, ok := sm.Prs[p]; !ok {
-			t.Errorf("missing peer %d", p)
-		}
 	}
 }
 
@@ -1557,12 +1519,12 @@ func TestSplitVote2AA(t *testing.T) {
 	}
 }
 
-func entsWithConfig(configFunc func(*Config), id uint64, terms ...uint64) *Raft {
+func entsWithConfig(configFunc func(*Config), terms ...uint64) *Raft {
 	storage := NewMemoryStorage()
 	for i, term := range terms {
 		storage.Append([]pb.Entry{{Index: uint64(i + 1), Term: term}})
 	}
-	cfg := newTestConfig(id, []uint64{}, 5, 1, storage)
+	cfg := newTestConfig(1, []uint64{}, 5, 1, storage)
 	if configFunc != nil {
 		configFunc(cfg)
 	}
@@ -1574,10 +1536,10 @@ func entsWithConfig(configFunc func(*Config), id uint64, terms ...uint64) *Raft 
 // votedWithConfig creates a raft state machine with Vote and Term set
 // to the given value but no log entries (indicating that it voted in
 // the given term but has not received any logs).
-func votedWithConfig(configFunc func(*Config), id, vote, term uint64) *Raft {
+func votedWithConfig(configFunc func(*Config), vote, term uint64) *Raft {
 	storage := NewMemoryStorage()
 	storage.SetHardState(pb.HardState{Vote: vote, Term: term})
-	cfg := newTestConfig(id, []uint64{}, 5, 1, storage)
+	cfg := newTestConfig(1, []uint64{}, 5, 1, storage)
 	if configFunc != nil {
 		configFunc(cfg)
 	}
@@ -1677,7 +1639,6 @@ func (nw *network) ignore(t pb.MessageType) {
 func (nw *network) recover() {
 	nw.dropm = make(map[connem]float64)
 	nw.ignorem = make(map[pb.MessageType]bool)
-	log.Debugf("network recovered")
 }
 
 func (nw *network) filter(msgs []pb.Message) []pb.Message {
