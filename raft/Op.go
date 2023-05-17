@@ -57,7 +57,6 @@ func (r *Raft) Step(m pb.Message) error {
 	return nil
 }
 func stepFollower(r *Raft, m pb.Message) error {
-
 	log.Debugf("receive msg: %s", MessageStr(r, m))
 	if r.State != StateFollower {
 		log.Panicf("%s", r.info())
@@ -142,6 +141,7 @@ func stepLeader(r *Raft, m pb.Message) error {
 		} else {
 			pr.Next--
 			log.Infof("reject")
+			r.send(r.NewAppendMsg(m.From))
 		}
 
 	case pb.MessageType_MsgHeartbeatResponse:

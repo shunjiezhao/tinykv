@@ -326,7 +326,6 @@ func (r *Raft) becomeLeader() {
 	if len(r.peers) == 1 {
 		r.updateCommit()
 	}
-	r.resetPrs()
 	log.Infof("%s became %s at term %d", r.info(), r.State, r.Term)
 }
 
