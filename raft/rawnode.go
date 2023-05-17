@@ -201,11 +201,11 @@ func (rn *RawNode) HasReady() bool {
 		return true
 	}
 
-	if rn.Raft.RaftLog.pendingSnapshot != nil { // 快照
+	if rn.Raft.RaftLog.pendingSnapshot != nil { // need new snapshot
 		return true
 	}
 
-	if len(rn.Raft.msgs) != 0 { // 发送
+	if len(rn.Raft.msgs) != 0 { // need send msg
 		return true
 	}
 
@@ -225,14 +225,21 @@ func (rn *RawNode) Advance(rd Ready) {
 		rn.hardState = rd.HardState
 	}
 
+	if rd.SoftState != nil {
+		rn.softState = rd.SoftState
+	}
+
 	rLog := rn.Raft.RaftLog
 	rLog.applied = max(rn.hardState.Commit, rLog.applied)
 	log.Debugf("Ready: Update applied to %d", rLog.applied)
 	if len(rd.Entries) > 0 {
 		rLog.stabled = max(rLog.stabled, rd.Entries[len(rd.Entries)-1].Index)
 	}
+
+	// clear
 	rn.Raft.msgs = nil
-	log.Debugf("advance 1")
+	rn.Raft.RaftLog.pendingSnapshot = nil
+	log.Debugf("advance")
 }
 
 // GetProgress return the Progress of this node and its peers, if this

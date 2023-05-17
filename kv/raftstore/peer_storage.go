@@ -331,10 +331,16 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	// and ps.clearExtraData to delete stale data
 	// Your Code Here (2C).
 	resp.PrevRegion = ps.region
+	metaData := snapshot.Metadata
+	if metaData != nil {
+		ps.raftState.LastIndex = max(ps.raftState.LastIndex, metaData.Index)
+		ps.raftState.LastTerm = max(ps.raftState.LastTerm, metaData.Term)
+		ps.applyState.AppliedIndex = max(ps.applyState.AppliedIndex, metaData.Index)
 
-	ps.raftState.LastIndex = max(ps.raftState.LastIndex, snapshot.Metadata.Index)
-	ps.raftState.LastTerm = max(ps.raftState.LastTerm, snapshot.Metadata.Term)
-	ps.applyState.AppliedIndex = max(ps.applyState.AppliedIndex, snapshot.Metadata.Index)
+		ps.applyState.TruncatedState.Index = metaData.Index
+		ps.applyState.TruncatedState.Term = metaData.Term
+	}
+
 	ch := make(chan bool)
 	ps.regionSched <- &runner.RegionTaskApply{
 		RegionId: ps.region.GetId(),
@@ -343,17 +349,20 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 		StartKey: snapData.Region.GetStartKey(),
 		EndKey:   snapData.Region.GetEndKey(),
 	}
+
 	<-ch
-	ps.clearExtraData(snapData.Region)
+	if !ps.isInitialized() {
+		ps.clearExtraData(snapData.Region)
+		mustNil(ps.clearMeta(kvWB, raftWB))
+	}
 
 	mustNil(kvWB.SetMeta(meta.RegionStateKey(ps.region.Id), ps.region))
 	mustNil(kvWB.SetMeta(meta.ApplyStateKey(ps.region.Id), ps.applyState))
+
 	mustNil(raftWB.SetMeta(meta.RaftStateKey(ps.region.Id), ps.raftState)) // raft state
-	meta.RaftStateKey(ps.region.Id)
 
 	ps.SetRegion(snapData.Region)
 	resp.Region = ps.region
-
 	return &resp, nil
 }
 

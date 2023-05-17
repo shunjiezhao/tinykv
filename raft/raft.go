@@ -169,7 +169,6 @@ type Raft struct {
 	// (Used in 3A conf change)
 	PendingConfIndex          uint64
 	randomizedElectionTimeout int
-	//tick                      func()
 }
 
 var rd = rand.NewSource(time.Now().UnixNano())
@@ -459,16 +458,17 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	if m.Snapshot == nil || m.Snapshot.Metadata == nil {
 		log.Panicf("recv snapshot is nil")
 	}
-	snapShot := m.Snapshot
-	index, term := snapShot.Metadata.Index, snapShot.Metadata.Term
+	snapShot, metaData := m.Snapshot, m.Snapshot.Metadata
+	index, term := metaData.Index, metaData.Term
 	if index < r.RaftLog.First() {
 		log.Debugf("handleSnapshot %s ignore snapshot %d < %d", r.info(), index, r.RaftLog.First())
 		return
 	}
 	r.RaftLog.pendingSnapshot = snapShot
 
-	if snapShot.Metadata.ConfState != nil {
-		newPeers := snapShot.Metadata.ConfState.Nodes
+	// update state
+	if metaData.ConfState != nil {
+		newPeers := metaData.ConfState.Nodes
 		prs := make(map[uint64]*Progress)
 		for _, id := range newPeers {
 			if pr, ok := r.Prs[id]; ok {
@@ -486,6 +486,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 
 	r.RaftLog.cutDown(index, term)
 	log.Infof("%s cut down log to %d", r.info(), index)
+	// todo: send response to leader
 }
 
 // addNode add a new node to raft group

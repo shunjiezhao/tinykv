@@ -58,8 +58,12 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		log.Infof("can't handle snapshot")
 	}
 
-	_, _ = d.peer.peerStorage.SaveReadyState(&ready)
+	regionState, err := d.peer.peerStorage.SaveReadyState(&ready)
+	mustNil(err)
+	d.SetRegion(regionState.Region) // set new region
+
 	d.Send(d.ctx.trans, ready.Messages)
+
 	var proposals []*proposal
 	var resp []*raft_cmdpb.Response
 
