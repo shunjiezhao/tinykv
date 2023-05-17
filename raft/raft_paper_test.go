@@ -27,6 +27,7 @@ package raft
 
 import (
 	"fmt"
+	"github.com/pingcap-incubator/tinykv/log"
 	"reflect"
 	"sort"
 	"testing"
@@ -85,6 +86,7 @@ func TestStartAsFollower2AA(t *testing.T) {
 // as heartbeat to all followers.
 // Reference: section 5.2
 func TestLeaderBcastBeat2AA(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	// heartbeat interval
 	hi := 1
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, hi, NewMemoryStorage())
@@ -127,6 +129,7 @@ func TestCandidateStartNewElection2AA(t *testing.T) {
 // round of RequestVote RPCs.
 // Reference: section 5.2
 func testNonleaderStartElection(t *testing.T, state StateType) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	// election timeout
 	et := 10
 	r := newTestRaft(1, []uint64{1, 2, 3}, et, 1, NewMemoryStorage())
@@ -157,7 +160,7 @@ func testNonleaderStartElection(t *testing.T, state StateType) {
 		{From: 1, To: 3, Term: 2, MsgType: pb.MessageType_MsgRequestVote},
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
-		t.Errorf("msgs = %v, want %v", msgs, wmsgs)
+		t.Errorf("msgs =\n %v\n, want %v", msgs, wmsgs)
 	}
 }
 
@@ -386,7 +389,7 @@ func TestLeaderStartReplication2AB(t *testing.T) {
 		{From: 1, To: 3, Term: 1, MsgType: pb.MessageType_MsgAppend, Index: li, LogTerm: 1, Entries: []*pb.Entry{&ent}, Commit: li},
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
-		t.Errorf("msgs = %+v, want %+v", msgs, wmsgs)
+		t.Errorf("msgs = \n%+v\n, want\n%+v", msgs, wmsgs)
 	}
 	if g := r.RaftLog.unstableEntries(); !reflect.DeepEqual(g, wents) {
 		t.Errorf("ents = %+v, want %+v", g, wents)
@@ -401,6 +404,7 @@ func TestLeaderStartReplication2AB(t *testing.T) {
 // servers eventually find out.
 // Reference: section 5.3
 func TestLeaderCommitEntry2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	s := NewMemoryStorage()
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, s)
 	r.becomeCandidate()
@@ -422,6 +426,7 @@ func TestLeaderCommitEntry2AB(t *testing.T) {
 	}
 	msgs := r.readMessages()
 	sort.Sort(messageSlice(msgs))
+	t.Log(msgs)
 	for i, m := range msgs {
 		if w := uint64(i + 2); m.To != w {
 			t.Errorf("to = %d, want %d", m.To, w)
@@ -488,6 +493,7 @@ func TestLeaderCommitPrecedingEntries2AB(t *testing.T) {
 		{{Term: 1, Index: 1}},
 	}
 	for i, tt := range tests {
+		t.Log(i)
 		storage := NewMemoryStorage()
 		storage.Append(tt)
 		r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, storage)
@@ -503,7 +509,7 @@ func TestLeaderCommitPrecedingEntries2AB(t *testing.T) {
 		li := uint64(len(tt))
 		wents := append(tt, pb.Entry{Term: 3, Index: li + 1}, pb.Entry{Term: 3, Index: li + 2, Data: []byte("some data")})
 		if g := r.RaftLog.nextEnts(); !reflect.DeepEqual(g, wents) {
-			t.Errorf("#%d: ents = %+v, want %+v", i, g, wents)
+			t.Errorf("#%d: \nents = %+v\n want %+v", i, g, wents)
 		}
 	}
 }
@@ -615,32 +621,34 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 // Also, it writes the new entry into stable storage.
 // Reference: section 5.3
 func TestFollowerAppendEntries2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	tests := []struct {
 		index, term uint64
+		lterm       uint64
 		ents        []*pb.Entry
 		wents       []*pb.Entry
 		wunstable   []*pb.Entry
 	}{
 		{
-			2, 2,
+			2, 2, 3,
 			[]*pb.Entry{{Term: 3, Index: 3}},
 			[]*pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}, {Term: 3, Index: 3}},
 			[]*pb.Entry{{Term: 3, Index: 3}},
 		},
 		{
-			1, 1,
+			1, 1, 4,
 			[]*pb.Entry{{Term: 3, Index: 2}, {Term: 4, Index: 3}},
 			[]*pb.Entry{{Term: 1, Index: 1}, {Term: 3, Index: 2}, {Term: 4, Index: 3}},
 			[]*pb.Entry{{Term: 3, Index: 2}, {Term: 4, Index: 3}},
 		},
 		{
-			0, 0,
+			0, 0, 2,
 			[]*pb.Entry{{Term: 1, Index: 1}},
 			[]*pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}},
 			[]*pb.Entry{},
 		},
 		{
-			0, 0,
+			0, 0, 3,
 			[]*pb.Entry{{Term: 3, Index: 1}},
 			[]*pb.Entry{{Term: 3, Index: 1}},
 			[]*pb.Entry{{Term: 3, Index: 1}},
@@ -652,13 +660,13 @@ func TestFollowerAppendEntries2AB(t *testing.T) {
 		r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, storage)
 		r.becomeFollower(2, 2)
 
-		r.Step(pb.Message{From: 2, To: 1, MsgType: pb.MessageType_MsgAppend, Term: 2, LogTerm: tt.term, Index: tt.index, Entries: tt.ents})
+		r.Step(pb.Message{From: 2, To: 1, MsgType: pb.MessageType_MsgAppend, Term: tt.lterm, LogTerm: tt.term, Index: tt.index, Entries: tt.ents})
 
 		wents := make([]pb.Entry, 0, len(tt.wents))
 		for _, ent := range tt.wents {
 			wents = append(wents, *ent)
 		}
-		if g := r.RaftLog.entries; !reflect.DeepEqual(g, wents) {
+		if g := r.RaftLog.allEntries(); !reflect.DeepEqual(g, wents) {
 			t.Errorf("#%d: ents = %+v, want %+v", i, g, wents)
 		}
 		var wunstable []pb.Entry
@@ -669,7 +677,7 @@ func TestFollowerAppendEntries2AB(t *testing.T) {
 			wunstable = append(wunstable, *ent)
 		}
 		if g := r.RaftLog.unstableEntries(); !reflect.DeepEqual(g, wunstable) {
-			t.Errorf("#%d: unstableEnts = %+v, want %+v", i, g, wunstable)
+			t.Errorf("#%d: unstableEnts =\n%+v, want\n%+v", i, g, wunstable)
 		}
 	}
 }
@@ -742,7 +750,7 @@ func TestLeaderSyncFollowerLog2AB(t *testing.T) {
 		n := newNetwork(lead, follower, nopStepper)
 		n.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 		// The election occurs in the term after the one we loaded with
-		// lead's term and commited index setted up above.
+		// lead's term and committed index setted up above.
 		n.send(pb.Message{From: 3, To: 1, MsgType: pb.MessageType_MsgRequestVoteResponse, Term: term + 1})
 
 		n.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
@@ -804,7 +812,7 @@ func TestVoteRequest2AB(t *testing.T) {
 // TestVoter tests the voter denies its vote if its own log is more up-to-date
 // than that of the candidate.
 // Reference: section 5.4.1
-func TestVoter2AA(t *testing.T) {
+func TestVoter2AB(t *testing.T) {
 	tests := []struct {
 		ents    []pb.Entry
 		logterm uint64
@@ -850,6 +858,7 @@ func TestVoter2AA(t *testing.T) {
 // current term are committed by counting replicas.
 // Reference: section 5.4.2
 func TestLeaderOnlyCommitsLogFromCurrentTerm2AB(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	ents := []pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}}
 	tests := []struct {
 		index   uint64
@@ -887,6 +896,7 @@ func (s messageSlice) Less(i, j int) bool { return fmt.Sprint(s[i]) < fmt.Sprint
 func (s messageSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 func commitNoopEntry(r *Raft, s *MemoryStorage) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	if r.State != StateLeader {
 		panic("it should only be used when it is the leader")
 	}
@@ -901,6 +911,7 @@ func commitNoopEntry(r *Raft, s *MemoryStorage) {
 	msgs := r.readMessages()
 	for _, m := range msgs {
 		if m.MsgType != pb.MessageType_MsgAppend || len(m.Entries) != 1 || m.Entries[0].Data != nil {
+			fmt.Printf("%+v", m)
 			panic("not a message to append noop entry")
 		}
 		r.Step(acceptAndReply(m))
@@ -914,6 +925,7 @@ func commitNoopEntry(r *Raft, s *MemoryStorage) {
 
 func acceptAndReply(m pb.Message) pb.Message {
 	if m.MsgType != pb.MessageType_MsgAppend {
+		log.Errorf("%+v", m)
 		panic("type should be MessageType_MsgAppend")
 	}
 	// Note: reply message don't contain LogTerm

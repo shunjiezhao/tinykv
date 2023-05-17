@@ -2,6 +2,7 @@ package raftstore
 
 import (
 	"bytes"
+	"github.com/pingcap-incubator/tinykv/log"
 	"testing"
 
 	"github.com/Connor1996/badger"
@@ -163,6 +164,7 @@ func TestPeerStorageClearMeta(t *testing.T) {
 }
 
 func TestPeerStorageEntries(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	ents := []eraftpb.Entry{
 		newTestEntry(3, 3),
 		newTestEntry(4, 4),
@@ -199,6 +201,7 @@ func TestPeerStorageEntries(t *testing.T) {
 }
 
 func TestPeerStorageAppend(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	ents := []eraftpb.Entry{
 		newTestEntry(3, 3), newTestEntry(4, 4), newTestEntry(5, 5)}
 	tests := []struct {

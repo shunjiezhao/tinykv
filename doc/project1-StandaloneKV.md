@@ -1,6 +1,6 @@
 # Project1 StandaloneKV
 
-In this project, you will build a standalone key/value storage [gRPC](https://grpc.io/docs/guides/) service with the support of the column family. Standalone means only a single node, not a distributed system. [Column family]( <https://en.wikipedia.org/wiki/Standard_column_family> ), it will abbreviate to CF below) is a term like key namespace, namely the values of the same key in different column families is not the same. You can simply regard multiple column families as separate mini databases. It’s used to support the transaction model in the project4, you will know why TinyKV needs the support of CF then.
+In this project, you will build a standalone key/value storage [gRPC](https://grpc.io/docs/guides/) service with the support of the column family. Standalone means only a single node, not a distributed system. [Column family]( <https://en.wikipedia.org/wiki/Standard_column_family> ) (it will abbreviate to CF below) is a term like key namespace, namely the values of the same key in different column families is not the same. You can simply regard multiple column families as separate mini databases. It’s used to support the transaction model in the project4, you will know why TinyKV needs the support of CF then.
 
 The service supports four basic operations: Put/Delete/Get/Scan. It maintains a simple database of key/value pairs. Keys and values are strings. `Put` replaces the value for a particular key for the specified CF in the database, `Delete` deletes the key's value for the specified CF, `Get` fetches the current value for a key for the specified CF, and `Scan` fetches the current value for a series of keys for the specified CF.
 
@@ -44,4 +44,4 @@ And you don’t need to consider the `kvrpcpb.Context` now, it’s used in the f
 
 #### Implement service handlers
 
-The final step of this project is to use the implemented storage engine to build raw key/value service handlers including RawGet/ RawScan/ RawPut/ RawDelete. The handler is already defined for you, you only need to fill up the implementation in `kv/server/server.go`. Once done, remember to run `make project1` to pass the test suite.
+The final step of this project is to use the implemented storage engine to build raw key/value service handlers including RawGet/ RawScan/ RawPut/ RawDelete. The handler is already defined for you, you only need to fill up the implementation in `kv/server/raw_api.go`. Once done, remember to run `make project1` to pass the test suite.
