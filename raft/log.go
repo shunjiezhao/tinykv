@@ -122,7 +122,7 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 		log.Panicf("applied(%d) > committed(%d)]", l.applied, l.committed)
 	}
 	ents = l.entries[l.applied-l.start+1 : l.committed-l.start+1]
-	log.Errorf("nextEnts: %v", ents)
+	log.Debugf("nextEnts: {%d:%d} start: %d", l.applied, l.committed, l.start)
 	return
 }
 
@@ -155,6 +155,7 @@ func (l *RaftLog) LastLog() pb.Entry {
 
 // if not in [First,LastLogIndex] return nil
 func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
+	log.Debugf("entryAt: {index:%d} {start:%d}", index, l.start)
 	if index == l.start {
 		return &l.entries[0], nil
 	}

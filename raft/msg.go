@@ -53,6 +53,7 @@ func (r *Raft) NewAppendMsg(to uint64) pb.Message {
 		log.Panicf("don't have this node %d ?", pr)
 	}
 
+	log.Infof("%s send to %d PR{%d:%d}", r.info(), to, pr.Match, pr.Next)
 	prevLog, err := r.RaftLog.entryAt(pr.Next - 1)
 
 	if err != nil {

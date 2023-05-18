@@ -141,7 +141,7 @@ func stepLeader(r *Raft, m pb.Message) error {
 		} else {
 			pr.Next--
 			log.Infof("reject")
-			r.send(r.NewAppendMsg(m.From))
+			r.sendAppend(m.From)
 		}
 
 	case pb.MessageType_MsgHeartbeatResponse:

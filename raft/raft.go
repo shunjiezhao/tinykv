@@ -226,6 +226,10 @@ func (r *Raft) resetPrs() {
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
+	if r.Prs[to].Next > r.RaftLog.LastIndex() {
+		log.Debugf("next %d > last %d", r.Prs[to].Next, r.RaftLog.LastIndex())
+		return false
+	}
 	r.send(r.NewAppendMsg(to))
 	return true
 }
@@ -259,6 +263,7 @@ func (r *Raft) tickLeader() {
 	// 发送心跳
 	if r.heartbeatElapsed >= r.heartbeatTimeout {
 		r.heartbeatElapsed = 0
+		log.Debug("send heartbeat")
 		if err := r.Step(pb.Message{MsgType: pb.MessageType_MsgBeat}); err != nil {
 			log.Panic(err)
 		}
@@ -383,7 +388,7 @@ func (r *Raft) send(m pb.Message) {
 	}
 
 	r.msgs = append(r.msgs, m)
-	log.Warnf("send %+v", m)
+	log.Warnf("send %+v", MessageStr(r, m))
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -453,6 +458,7 @@ func (r *Raft) handleProse(m pb.Message) {
 	}
 }
 func (r *Raft) handleSnapshot(m pb.Message) {
+	log.Debug("handleSnapshot")
 	// Your Code Here (2C).
 	if m.Snapshot == nil || m.Snapshot.Metadata == nil {
 		log.Panicf("recv snapshot is nil")

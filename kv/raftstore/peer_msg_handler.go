@@ -60,12 +60,13 @@ func (d *peerMsgHandler) HandleRaftReady() {
 
 	regionState, err := d.peer.peerStorage.SaveReadyState(&ready)
 	mustNil(err)
-	d.SetRegion(regionState.Region) // set new region
+	if regionState != nil && regionState.Region != nil {
+		d.SetRegion(regionState.Region) // set new region
+	}
 
 	d.Send(d.ctx.trans, ready.Messages)
 
-	var proposals []*proposal
-	var resp []*raft_cmdpb.Response
+	var resp = map[*proposal]*raft_cmdpb.Response{}
 
 	if len(ready.CommittedEntries) > 0 {
 		w := new(engine_util.WriteBatch)
@@ -73,13 +74,18 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		for _, en := range ready.CommittedEntries {
 			request := raft_cmdpb.RaftCmdRequest{}
 			mustNil(request.Unmarshal(en.Data))
-			pro := d.findPro(en.Index, en.Term)
-			if len(request.Requests) == 0 {
+			log.Debugf("handle raft ready %+v", request)
+			if request.AdminRequest != nil {
+				log.Infof("amdin request %+v", request.AdminRequest)
 				d.handleAdminReq(request.AdminRequest, w, db)
+			} else if len(request.Requests) > 0 {
+				pro := d.findPro(en.Index, en.Term)
+				log.Errorf("%s find pro {%d:%d}%+v", d.RaftGroup.Raft.State, en.Index, en.Term, pro)
+				resp[pro] = d.handleReq(pro, &request, w, db)
+				log.Debug("handle req", request.Requests[0])
 			} else {
-				resp = append(resp, d.handleReq(pro, &request, w, db))
+				log.Debug("empty log")
 			}
-			proposals = append(proposals, pro)
 		}
 
 		d.peerStorage.applyState.AppliedIndex = ready.CommittedEntries[len(ready.CommittedEntries)-1].Index
@@ -87,19 +93,27 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		w.MustWriteToDB(db)
 	}
 
-	for i, pro := range proposals {
+	log.Debug("resp: ", resp)
+	for _, pro := range d.proposals {
 		if pro != nil {
+			re, ok := resp[pro]
+			if !ok {
+				continue
+			}
 			pro.cb.Done(&raft_cmdpb.RaftCmdResponse{
 				Header:    &raft_cmdpb.RaftResponseHeader{CurrentTerm: d.Term()},
-				Responses: []*raft_cmdpb.Response{resp[i]},
+				Responses: []*raft_cmdpb.Response{re},
 			})
+			log.Debug("proposals done", pro)
 		}
 	}
-	d.proposals = []*proposal{} // clear proposals
 	d.RaftGroup.Advance(ready)
 }
 
 func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, w *engine_util.WriteBatch, db *badger.DB) {
+	if req == nil {
+		return
+	}
 	switch req.CmdType {
 	case raft_cmdpb.AdminCmdType_CompactLog:
 		index, term := req.GetCompactLog().GetCompactIndex(), req.GetCompactLog().GetCompactTerm()
@@ -222,10 +236,14 @@ func (d *peerMsgHandler) preProposeRaftCommand(req *raft_cmdpb.RaftCmdRequest) e
 }
 
 func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
+	log.Debug("proposeRaftCommand")
 	err := d.preProposeRaftCommand(msg)
 	if err != nil {
 		cb.Done(ErrResp(err))
 		return
+	}
+	if d.RaftGroup.Raft.State != raft.StateLeader {
+		log.Panicf("%s is not leader", d.Tag)
 	}
 	// Your Code Here (2B).
 	data, err := msg.Marshal()
@@ -245,6 +263,8 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 			continue
 		}
 	}
+
+	log.Debugf("%s append proposals %+v", d.RaftGroup.Raft.State, pro)
 	d.proposals = append(d.proposals, &pro)
 }
 
