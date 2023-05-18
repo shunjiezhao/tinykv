@@ -190,7 +190,7 @@ func MessageStr(r *Raft, m pb.Message) string {
 	return m.String()
 }
 
-func (r *Raft) info() string {
+func (r *Raft) Info() string {
 	return fmt.Sprintf("{%x:%s:%d} ", r.id, r.State, r.Term)
 }
 func mustBeNil(err error) {

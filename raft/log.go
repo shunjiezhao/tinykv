@@ -15,7 +15,6 @@
 package raft
 
 import (
-	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -83,7 +82,6 @@ func newLog(storage Storage) *RaftLog {
 	mustBeNil(err)
 	log.entries = append(log.entries, entries...)
 
-	fmt.Printf("newLog: %+v\n", log)
 	return log
 }
 

@@ -194,22 +194,21 @@ func (rn *RawNode) Ready() Ready {
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
 	if len(rn.Raft.RaftLog.unstableEntries()) != 0 { // 追加的日志代持久化持久化
-		log.Infof("HasReady: unstableEntries")
+		log.Infof("%s HasReady: unstableEntries", rn.Raft.Info())
 		return true
 	}
 
 	if len(rn.Raft.RaftLog.nextEnts()) != 0 { // 应用
-		log.Infof("HasReady: nextEnts")
+		log.Infof("%s HasReady: nextEnts", rn.Raft.Info())
 		return true
 	}
 
 	if rn.Raft.RaftLog.pendingSnapshot != nil { // need new snapshot
-		log.Infof("HasReady: pendingSnapshot")
+		log.Infof("%s HasReady: pendingSnapshot", rn.Raft.Info())
 		return true
 	}
 
 	if len(rn.Raft.msgs) != 0 { // need send msg
-		log.Infof("HasReady: msgs")
 		return true
 	}
 

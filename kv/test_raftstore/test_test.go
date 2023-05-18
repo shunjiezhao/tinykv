@@ -356,6 +356,7 @@ func TestOnePartition2B(t *testing.T) {
 
 	region := cluster.GetRegion([]byte(""))
 	leader := cluster.LeaderOfRegion(region.GetId())
+	log.Warnf("leader %v", leader)
 	s1 := []uint64{leader.GetStoreId()}
 	s2 := []uint64{}
 	for _, p := range region.GetPeers() {
@@ -376,9 +377,11 @@ func TestOnePartition2B(t *testing.T) {
 	})
 	cluster.MustPut([]byte("k1"), []byte("v1"))
 	cluster.MustGet([]byte("k1"), []byte("v1"))
+	log.Warnf("done1")
 	MustGetNone(cluster.engines[s2[0]], []byte("k1"))
 	MustGetNone(cluster.engines[s2[1]], []byte("k1"))
 	cluster.ClearFilters()
+	log.Warnf("done2")
 
 	// old leader in minority, new leader should be elected
 	s2 = append(s2, s1[2])
@@ -387,16 +390,31 @@ func TestOnePartition2B(t *testing.T) {
 		s1: s1,
 		s2: s2,
 	})
+	// leader, 1 , 2
+	// not leader, 3 , 4
+
+	log.Warnf("done3")
 	cluster.MustGet([]byte("k1"), []byte("v1"))
 	cluster.MustPut([]byte("k1"), []byte("changed"))
 	MustGetEqual(cluster.engines[s1[0]], []byte("k1"), []byte("v1"))
 	MustGetEqual(cluster.engines[s1[1]], []byte("k1"), []byte("v1"))
 	cluster.ClearFilters()
+	log.Warnf("done4")
 
 	// when partition heals, old leader should sync data
 	cluster.MustPut([]byte("k2"), []byte("v2"))
 	MustGetEqual(cluster.engines[s1[0]], []byte("k2"), []byte("v2"))
 	MustGetEqual(cluster.engines[s1[0]], []byte("k1"), []byte("changed"))
+	log.Warnf("done5")
+}
+
+func TestManyTimes(t *testing.T) {
+	t.Parallel()
+	for i := 0; i < 100; i++ {
+		t.Run(fmt.Sprintf("test-%d", i), func(t *testing.T) {
+			TestOnePartition2B(t)
+		})
+	}
 }
 
 func TestManyPartitionsOneClient2B(t *testing.T) {

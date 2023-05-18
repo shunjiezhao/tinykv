@@ -10,7 +10,7 @@ type stepFunc func(r *Raft, m pb.Message) error
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
-	log.Infof("%s receive msg: %s", r.info(), MessageStr(r, m))
+	log.Debugf("%s receive msg: %s", r.Info(), MessageStr(r, m))
 
 	switch {
 	case m.Term == 0: //local
@@ -19,6 +19,7 @@ func (r *Raft) Step(m pb.Message) error {
 		return nil
 	case r.Term < m.Term:
 		if m.MsgType == pb.MessageType_MsgAppend || m.MsgType == pb.MessageType_MsgHeartbeat || m.MsgType == pb.MessageType_MsgSnapshot {
+			log.Infof("append")
 			r.becomeFollower(m.Term, m.From)
 		} else {
 			r.becomeFollower(m.Term, None)
@@ -44,7 +45,7 @@ func (r *Raft) Step(m pb.Message) error {
 		r.handleSnapshot(m)
 	case pb.MessageType_MsgBeat:
 		if r.State == StateLeader {
-			r.bckstHeart()
+			r.bcastAppend(false)
 		}
 
 	default:
@@ -59,17 +60,14 @@ func (r *Raft) Step(m pb.Message) error {
 func stepFollower(r *Raft, m pb.Message) error {
 	log.Debugf("receive msg: %s", MessageStr(r, m))
 	if r.State != StateFollower {
-		log.Panicf("%s", r.info())
+		log.Panicf("%s", r.Info())
 	}
-	r.becomeFollower(m.Term, m.From)
 	switch m.MsgType {
 	case pb.MessageType_MsgPropose:
 		return ErrProposalDropped
 	case pb.MessageType_MsgHeartbeat:
-		r.becomeFollower(m.Term, m.From)
 		r.handleHeartbeat(m)
 	case pb.MessageType_MsgAppend:
-		r.becomeFollower(m.Term, m.From)
 		r.handleAppendEntries(m)
 
 	}
@@ -77,7 +75,7 @@ func stepFollower(r *Raft, m pb.Message) error {
 }
 func stepCandidate(r *Raft, m pb.Message) error {
 	if r.State != StateCandidate {
-		log.Panicf("%s", r.info())
+		log.Panicf("%s", r.Info())
 	}
 
 	switch m.MsgType {
@@ -85,15 +83,13 @@ func stepCandidate(r *Raft, m pb.Message) error {
 		return ErrProposalDropped
 
 	case pb.MessageType_MsgBeat:
-		r.becomeFollower(m.Term, m.From)
 		r.handleHeartbeat(m)
 	case pb.MessageType_MsgAppend:
-		r.becomeFollower(m.Term, m.From)
 		r.handleAppendEntries(m)
 
 	case pb.MessageType_MsgRequestVoteResponse:
 		gr, rj, res := r.poll(m.From, m.MsgType, !m.Reject) //Reject = true stand not vote
-		log.Infof("%s has received %s %d votes and %d vote rejections result: %v", r.info(), MessageStr(r, m), gr, rj, res)
+		log.Infof("%s has received %s %d votes and %d vote rejections result: %v", r.Info(), MessageStr(r, m), gr, rj, res)
 
 		switch res {
 		case VoteWon:
@@ -112,16 +108,14 @@ func stepCandidate(r *Raft, m pb.Message) error {
 }
 func stepLeader(r *Raft, m pb.Message) error {
 	if r.State != StateLeader {
-		log.Panicf("%s", r.info())
+		log.Panicf("%s", r.Info())
 	}
 
 	switch m.MsgType {
 	case pb.MessageType_MsgPropose:
 		r.handleProse(m)
 	case pb.MessageType_MsgBeat:
-		r.Visit(func(idx int, to uint64) {
-			r.sendHeartbeat(to)
-		}, false)
+		r.bckstHeart()
 	case pb.MessageType_MsgAppendResponse:
 		// 1. handle reject
 		log.Debugf("get from %d reject: %v", m.From, m.Reject)
@@ -129,7 +123,7 @@ func stepLeader(r *Raft, m pb.Message) error {
 		if m.Reject == false {
 			pr.Next = max(pr.Next, m.Index+1)
 			pr.Match = max(pr.Match, m.Index)
-			log.Infof("%s has received %s index: %d", r.info(), MessageStr(r, m), m.Index)
+			log.Infof("%s has received %s index: %d", r.Info(), MessageStr(r, m), m.Index)
 			// 2. update commit
 			oldCommit := r.RaftLog.committed
 			newCommit := r.updateCommit()
@@ -137,10 +131,9 @@ func stepLeader(r *Raft, m pb.Message) error {
 				log.Debugf("get commit :%d", newCommit)
 				r.bcastAppend(false)
 			}
-
 		} else {
 			pr.Next--
-			log.Infof("reject")
+			log.Infof("rejectLog")
 			r.sendAppend(m.From)
 		}
 

@@ -7,9 +7,9 @@ import (
 
 func (r *Raft) poll(id uint64, t pb.MessageType, v bool) (granted int, rejected int, result VoteResult) {
 	if v {
-		log.Infof("%s received %s from %x at term %d", r.info(), t, id, r.Term)
+		log.Infof("%s received %s from %x at term %d", r.Info(), t, id, r.Term)
 	} else {
-		log.Infof("%s received %s rejection from %x at term %d", r.info(), t, id, r.Term)
+		log.Infof("%s received %s rejection from %x at term %d", r.Info(), t, id, r.Term)
 	}
 	r.RecordVote(id, v)
 	return r.TallyVotes()
@@ -18,9 +18,9 @@ func (r *Raft) RecordVote(id uint64, v bool) {
 	_, ok := r.votes[id]
 	if !ok {
 		r.votes[id] = v
-		log.Debugf("%s record vote %x %v", r.info(), id, v)
+		log.Debugf("%s record vote %x %v", r.Info(), id, v)
 	} else {
-		log.Debugf("%s record vote %x already exist", r.info(), id)
+		log.Debugf("%s record vote %x already exist", r.Info(), id)
 	}
 }
 
@@ -87,7 +87,7 @@ func (r *Raft) VoteResult() VoteResult {
 	}
 
 	q := len(servers)/2 + 1
-	log.Infof("%s get q: %d voteCnt: %d missing: %d", r.info(), q, votedCnt, missing)
+	log.Infof("%s get q: %d voteCnt: %d missing: %d", r.Info(), q, votedCnt, missing)
 	if votedCnt >= q {
 		return VoteWon
 	}

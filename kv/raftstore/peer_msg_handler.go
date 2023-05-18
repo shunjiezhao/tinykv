@@ -3,8 +3,10 @@ package raftstore
 import (
 	"fmt"
 	"github.com/Connor1996/badger"
+	"github.com/golang/protobuf/proto"
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/meta"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"github.com/pingcap-incubator/tinykv/raft"
 	"time"
 
@@ -66,51 +68,89 @@ func (d *peerMsgHandler) HandleRaftReady() {
 
 	d.Send(d.ctx.trans, ready.Messages)
 
-	var resp = map[*proposal]*raft_cmdpb.Response{}
+	var resp = map[*pb.Entry]*raft_cmdpb.Response{}
 
 	if len(ready.CommittedEntries) > 0 {
-		w := new(engine_util.WriteBatch)
 		db := d.peerStorage.Engines.Kv
-		for _, en := range ready.CommittedEntries {
-			request := raft_cmdpb.RaftCmdRequest{}
-			mustNil(request.Unmarshal(en.Data))
-			log.Debugf("handle raft ready %+v", request)
-			if request.AdminRequest != nil {
-				log.Infof("amdin request %+v", request.AdminRequest)
-				d.handleAdminReq(request.AdminRequest, w, db)
-			} else if len(request.Requests) > 0 {
-				pro := d.findPro(en.Index, en.Term)
-				log.Errorf("%s find pro {%d:%d}%+v", d.RaftGroup.Raft.State, en.Index, en.Term, pro)
-				resp[pro] = d.handleReq(pro, &request, w, db)
-				log.Debug("handle req", request.Requests[0])
-			} else {
-				log.Debug("empty log")
+		var entry []*pb.Entry
+		if err := db.Update(func(txn *badger.Txn) error {
+			for _, en := range ready.CommittedEntries {
+				request := raft_cmdpb.RaftCmdRequest{}
+				mustNil(request.Unmarshal(en.Data))
+				entry = append(entry, &en)
+				log.Debugf("handle raft ready %+v", request)
+				if request.AdminRequest != nil {
+					log.Infof("amdin request %+v", request.AdminRequest)
+					d.handleAdminReq(request.AdminRequest)
+				} else if len(request.Requests) > 0 {
+					resp[&en] = d.handleReq(&request, txn)
+				} else {
+					log.Debug("empty log")
+				}
+
+			}
+
+			d.peerStorage.applyState.AppliedIndex = max(d.peerStorage.AppliedIndex(), ready.CommittedEntries[len(ready.CommittedEntries)-1].Index)
+			marshal, err := proto.Marshal(d.peerStorage.applyState)
+			mustNil(err)
+			mustNil(txn.Set(meta.ApplyStateKey(d.regionId), marshal))
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+
+		for _, en := range entry {
+			if pro := d.handlePro(*en); pro != nil {
+				log.Infof("proposals %+v %+v", pro, resp[en])
+				if resp[en].CmdType == raft_cmdpb.CmdType_Snap {
+					pro.cb.Txn = d.peerStorage.Engines.Kv.NewTransaction(false)
+				}
+				pro.cb.Done(&raft_cmdpb.RaftCmdResponse{
+					Header:    &raft_cmdpb.RaftResponseHeader{CurrentTerm: d.Term()},
+					Responses: []*raft_cmdpb.Response{resp[en]},
+				})
+				log.Debug("proposals done", pro)
 			}
 		}
 
-		d.peerStorage.applyState.AppliedIndex = ready.CommittedEntries[len(ready.CommittedEntries)-1].Index
-		mustNil(w.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState))
-		w.MustWriteToDB(db)
 	}
 
-	log.Debug("resp: ", resp)
-	for _, pro := range d.proposals {
-		if pro != nil {
-			re, ok := resp[pro]
-			if !ok {
-				continue
-			}
-			pro.cb.Done(&raft_cmdpb.RaftCmdResponse{
-				Header:    &raft_cmdpb.RaftResponseHeader{CurrentTerm: d.Term()},
-				Responses: []*raft_cmdpb.Response{re},
-			})
-			log.Debug("proposals done", pro)
-		}
-	}
 	d.RaftGroup.Advance(ready)
 }
 
-func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, w *engine_util.WriteBatch, db *badger.DB) {
+func (d *peerMsgHandler) handlePro(entry pb.Entry) *proposal {
+	for len(d.proposals) > 0 {
+		proposal := d.proposals[0]
+		if entry.Term < proposal.term {
+			break
+		}
+
+		if entry.Term > proposal.term {
+			proposal.cb.Done(ErrRespStaleCommand(proposal.term))
+			d.proposals = d.proposals[1:]
+			continue
+		}
+
+		if entry.Term == proposal.term && entry.Index < proposal.index {
+			break
+		}
+
+		if entry.Term == proposal.term && entry.Index > proposal.index {
+			proposal.cb.Done(ErrRespStaleCommand(proposal.term))
+			d.proposals = d.proposals[1:]
+			continue
+		}
+
+		if entry.Index == proposal.index && entry.Term == proposal.term {
+			d.proposals = d.proposals[1:]
+			return proposal
+		}
+
+		panic("This should not happen.")
+	}
+	return nil
+}
+func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest) {
 	if req == nil {
 		return
 	}
@@ -133,32 +173,35 @@ func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, w *engine_
 
 }
 
-func (d *peerMsgHandler) handleReq(pro *proposal, request *raft_cmdpb.RaftCmdRequest, w *engine_util.WriteBatch, db *badger.DB) *raft_cmdpb.Response {
+func (d *peerMsgHandler) handleReq(request *raft_cmdpb.RaftCmdRequest, txn *badger.Txn) *raft_cmdpb.Response {
 	if len(request.Requests) != 1 {
 		log.Panicf("len(request.Requests) != 1 %d", len(request.Requests))
 	}
+
 	req := request.Requests[0]
 	var res raft_cmdpb.Response
 	res.CmdType = req.CmdType
 	switch req.CmdType {
 	case raft_cmdpb.CmdType_Get:
-		val, err := engine_util.GetCF(db, req.Get.Cf, req.Get.Key)
+		val, err := txn.Get(engine_util.KeyWithCF(req.Get.Cf, req.Get.Key))
+		log.Infof("%s get %s %s", d.RaftGroup.Raft.Info(), req.Get.Cf, req.Get.Key)
+		mustNil(err)
+		value, err := val.Value()
 		mustNil(err)
 		res.Get = &raft_cmdpb.GetResponse{
-			Value: val,
+			Value: value,
 		}
 	case raft_cmdpb.CmdType_Put:
-		w.SetCF(req.GetPut().GetCf(), req.GetPut().Key, req.GetPut().Value)
+		log.Infof("%s Put (%s,%s) %s", d.RaftGroup.Raft.Info(), req.GetPut().GetCf(), req.GetPut().Key, req.GetPut().Value)
+		mustNil(txn.Set(engine_util.KeyWithCF(req.GetPut().GetCf(), req.GetPut().Key), req.GetPut().Value))
 		res.Put = &raft_cmdpb.PutResponse{}
 	case raft_cmdpb.CmdType_Delete:
-		w.DeleteCF(req.Delete.Cf, req.Delete.Key)
+		log.Infof("Delete (%s,%s)", req.Delete.Cf, req.Delete.Key)
+		mustNil(txn.Delete(engine_util.KeyWithCF(req.GetDelete().GetCf(), req.GetDelete().Key)))
 		res.Delete = &raft_cmdpb.DeleteResponse{}
 	case raft_cmdpb.CmdType_Snap:
 		log.Debug("snap")
 		res.Snap = &raft_cmdpb.SnapResponse{Region: d.Region()}
-		if pro != nil {
-			pro.cb.Txn = d.peerStorage.Engines.Kv.NewTransaction(false)
-		}
 	}
 	res.CmdType = req.CmdType
 	return &res
@@ -208,6 +251,7 @@ func (d *peerMsgHandler) preProposeRaftCommand(req *raft_cmdpb.RaftCmdRequest) e
 	// Check whether the store has the right peer to handle the request.
 	regionID := d.regionId
 	leaderID := d.LeaderId()
+	log.Info("leader is ", leaderID)
 	if !d.IsLeader() {
 		leader := d.getPeerFromCache(leaderID)
 		return &util.ErrNotLeader{RegionId: regionID, Leader: leader}

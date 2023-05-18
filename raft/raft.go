@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	"math/rand"
 	"time"
@@ -200,17 +199,16 @@ func newRaft(c *Config) *Raft {
 	if raft.id == 0 {
 		log.Panicf("id is 0, can't not be raft")
 	}
-
-	raft.step = stepFollower
-	raft.reset(state.Term)
-	raft.Vote = state.Vote
 	raft.peers = c.peers
 	if len(cfg.Nodes) != 0 {
 		raft.peers = cfg.Nodes
 	}
+	raft.step = stepFollower
+	raft.reset(state.Term)
+	raft.Vote = state.Vote
 	raft.resetPrs()
 
-	fmt.Printf("New Raft %+v\n", raft)
+	log.Debug("New Raft %+v\n", raft)
 	return raft
 }
 func (r *Raft) resetPrs() {
@@ -240,9 +238,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		log.Panicf("send your self ?")
 	}
 	// Your Code Here (2A).
-	msg := r.NewHeartbeatMsg(to) // 匹配
-	r.send(msg)
-	log.Debugf("append msg %s", MessageStr(r, msg))
+	r.send(r.NewHeartbeatMsg(to))
 }
 
 func (r *Raft) Visit(f func(idx int, to uint64), sendMe bool) {
@@ -276,7 +272,7 @@ func (r *Raft) tick() {
 	} else {
 		r.electionElapsed++
 		if r.pastElectionTimeout() {
-			log.Errorf("%s time out", r.info())
+			log.Errorf("%s time out", r.Info())
 			r.resetElectionTimeOut()
 			if err := r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgHup}); err != nil {
 				log.Debugf("error occurred during election: %v", err)
@@ -297,7 +293,7 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.electionElapsed = 0   // 清空选举超时
 	r.State = StateFollower // 状态改变
 	if r.Term != 0 {
-		log.Infof("%s became %s at term %d Lead:%d", r.info(), r.State, r.Term, lead)
+		log.Infof("%s became %s at term %d Lead:%d", r.Info(), r.State, r.Term, lead)
 	}
 }
 
@@ -309,7 +305,7 @@ func (r *Raft) becomeCandidate() {
 	r.State = StateCandidate
 	r.Vote = r.id
 	r.votes = map[uint64]bool{} // RESET
-	log.Infof("%s became candidate at term %d", r.info(), r.Term)
+	log.Infof("%s became candidate at term %d", r.Info(), r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -329,9 +325,10 @@ func (r *Raft) becomeLeader() {
 	entry := &pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1, Data: nil}
 	r.leaderAppendEntries(entry)
 	if len(r.peers) == 1 {
+		log.Panicf("single node")
 		r.updateCommit()
 	}
-	log.Infof("%s became %s at term %d", r.info(), r.State, r.Term)
+	log.Infof("%s became %s at term %d", r.Info(), r.State, r.Term)
 }
 
 // updateCommit update and return commit index
@@ -352,7 +349,7 @@ func (r *Raft) updateCommit() uint64 {
 		// 假设存在 N 满足N > CommitIndex，使得大多数的 matchIndex[i] ≥ N以及log[N].term == CurrentTerm 成立，则令 CommitIndex = N（5.3 和 5.4 节）
 		if count > len(r.peers)/2 {
 			r.RaftLog.committed = index
-			log.Debugf("%s update commit to %d", r.info(), r.RaftLog.committed)
+			log.Debugf("%s update commit to %d", r.Info(), r.RaftLog.committed)
 		}
 	}
 	return r.RaftLog.committed
@@ -365,7 +362,7 @@ func (r *Raft) bckstHeart() {
 }
 func (r *Raft) hup() {
 	if r.State == StateLeader {
-		log.Infof("%s is already leader", r.info())
+		log.Infof("%s is already leader", r.Info())
 		return
 	}
 	r.becomeCandidate()
@@ -388,7 +385,7 @@ func (r *Raft) send(m pb.Message) {
 	}
 
 	r.msgs = append(r.msgs, m)
-	log.Warnf("send %+v", MessageStr(r, m))
+	log.Debugf("send %+v", MessageStr(r, m))
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -427,14 +424,14 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	index = m.Index + uint64(len(m.Entries)) // update index all log we received
 	if myCommit < m.Commit {                 // < leader commit
 		r.RaftLog.updateCommitIndex(min(index, m.Commit))
-		log.Infof("%s update commit %d->%d", r.info(), myCommit, min(index, m.Commit))
+		log.Infof("%s update commit %d->%d", r.Info(), myCommit, min(index, m.Commit))
 	}
 	// update send index
-	log.Debugf("%s commit %d NewIndex: %d LeaderCommit: %d", r.info(), r.RaftLog.committed, index, m.Commit)
+	log.Debugf("%s commit %d NewIndex: %d LeaderCommit: %d", r.Info(), r.RaftLog.committed, index, m.Commit)
 send:
 	msg := r.NewRespAppendMsg(m.From, index, reject)
 	r.send(msg)
-	log.Debugf("%s send append response to %x %s", r.info(), m.From, MessageStr(r, msg))
+	log.Debugf("%s send append response to %x %s", r.Info(), m.From, MessageStr(r, msg))
 }
 func (r *Raft) resetElectionTimeOut() {
 	r.electionElapsed = 0
@@ -466,7 +463,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	snapShot, metaData := m.Snapshot, m.Snapshot.Metadata
 	index, term := metaData.Index, metaData.Term
 	if index < r.RaftLog.First() {
-		log.Debugf("handleSnapshot %s ignore snapshot %d < %d", r.info(), index, r.RaftLog.First())
+		log.Debugf("handleSnapshot %s ignore snapshot %d < %d", r.Info(), index, r.RaftLog.First())
 		return
 	}
 	r.RaftLog.pendingSnapshot = snapShot
@@ -490,7 +487,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	}
 
 	r.RaftLog.cutDown(index, term)
-	log.Infof("%s cut down log to %d", r.info(), index)
+	log.Infof("%s cut down log to %d", r.Info(), index)
 	// todo: send response to leader
 }
 
@@ -532,13 +529,13 @@ func (r *Raft) appendEntries(entries ...*pb.Entry) uint64 {
 	for _, entry := range entries {
 		// if has this log we should truncate
 		if entry.Index <= r.RaftLog.LastIndex() && r.RaftLog.IsConflict(entry.Index, entry.Term) {
-			log.Debugf("%s truncate log %d", r.info(), entry.Index)
+			log.Debugf("%s truncate log %d", r.Info(), entry.Index)
 			r.RaftLog.truncate(entry.Index) //
 		} else if r.RaftLog.Contain(entry.Index) {
 			continue
 		}
 		// new log
-		log.Debugf("%s append log %s", r.info(), entry)
+		log.Debugf("%s append log %s", r.Info(), entry)
 		r.RaftLog.append(*entry)
 	}
 	// update commit
