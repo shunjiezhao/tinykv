@@ -24,7 +24,6 @@ func (r *Raft) Step(m pb.Message) error {
 		} else {
 			r.becomeFollower(m.Term, None)
 		}
-
 	}
 	switch m.MsgType {
 	case pb.MessageType_MsgHup:
@@ -45,7 +44,7 @@ func (r *Raft) Step(m pb.Message) error {
 		r.handleSnapshot(m)
 	case pb.MessageType_MsgBeat:
 		if r.State == StateLeader {
-			r.bcastAppend(false)
+			r.bckstHeart()
 		}
 
 	default:
@@ -66,8 +65,10 @@ func stepFollower(r *Raft, m pb.Message) error {
 	case pb.MessageType_MsgPropose:
 		return ErrProposalDropped
 	case pb.MessageType_MsgHeartbeat:
+		r.becomeFollower(m.Term, m.From)
 		r.handleHeartbeat(m)
 	case pb.MessageType_MsgAppend:
+		r.becomeFollower(m.Term, m.From)
 		r.handleAppendEntries(m)
 
 	}
@@ -85,6 +86,7 @@ func stepCandidate(r *Raft, m pb.Message) error {
 	case pb.MessageType_MsgBeat:
 		r.handleHeartbeat(m)
 	case pb.MessageType_MsgAppend:
+		r.becomeFollower(m.Term, m.From)
 		r.handleAppendEntries(m)
 
 	case pb.MessageType_MsgRequestVoteResponse:
@@ -95,7 +97,7 @@ func stepCandidate(r *Raft, m pb.Message) error {
 		case VoteWon:
 			if r.State == StateCandidate {
 				r.becomeLeader()
-				r.bcastAppend(false)
+				r.bcastAppend(false, false)
 			}
 		case VoteLost:
 			// pb.MsgPreVoteResp contains future term of pre-candidate
@@ -114,6 +116,7 @@ func stepLeader(r *Raft, m pb.Message) error {
 	switch m.MsgType {
 	case pb.MessageType_MsgPropose:
 		r.handleProse(m)
+		r.bcastAppend(false, false)
 	case pb.MessageType_MsgBeat:
 		r.bckstHeart()
 	case pb.MessageType_MsgAppendResponse:
@@ -129,17 +132,17 @@ func stepLeader(r *Raft, m pb.Message) error {
 			newCommit := r.updateCommit()
 			if oldCommit < newCommit {
 				log.Debugf("get commit :%d", newCommit)
-				r.bcastAppend(false)
+				r.bcastAppend(false, true)
 			}
 		} else {
 			pr.Next--
 			log.Infof("rejectLog")
-			r.sendAppend(m.From)
 		}
+		r.sendAppend(m.From, false)
 
 	case pb.MessageType_MsgHeartbeatResponse:
 		// 1. 追赶日志
-		r.sendAppend(m.From)
+		r.sendAppend(m.From, false)
 	}
 
 	return nil

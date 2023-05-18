@@ -182,6 +182,7 @@ func newRaft(c *Config) *Raft {
 		panic(err.Error())
 	}
 	state, cfg, err := c.Storage.InitialState()
+	log.Infof("state: %+v confState: %+v", state, cfg)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -223,8 +224,8 @@ func (r *Raft) resetPrs() {
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
-func (r *Raft) sendAppend(to uint64) bool {
-	if r.Prs[to].Next > r.RaftLog.LastIndex() {
+func (r *Raft) sendAppend(to uint64, null bool) bool {
+	if r.Prs[to].Next > r.RaftLog.LastIndex() && null == false {
 		log.Debugf("next %d > last %d", r.Prs[to].Next, r.RaftLog.LastIndex())
 		return false
 	}
@@ -243,7 +244,6 @@ func (r *Raft) sendHeartbeat(to uint64) {
 
 func (r *Raft) Visit(f func(idx int, to uint64), sendMe bool) {
 	for idx, to := range r.peers {
-		log.Debugf("visit %d %d", idx, to)
 		if r.id == to && sendMe == false {
 			continue
 		}
@@ -325,7 +325,7 @@ func (r *Raft) becomeLeader() {
 	entry := &pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1, Data: nil}
 	r.leaderAppendEntries(entry)
 	if len(r.peers) == 1 {
-		log.Panicf("single node")
+		log.Infof("single node")
 		r.updateCommit()
 	}
 	log.Infof("%s became %s at term %d", r.Info(), r.State, r.Term)
@@ -449,7 +449,6 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleProse(m pb.Message) {
 	r.leaderAppendEntries(m.Entries...)
-	r.bcastAppend(false)
 	if len(r.peers) == 1 {
 		r.updateCommit()
 	}
@@ -501,9 +500,9 @@ func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
 }
 
-func (r *Raft) bcastAppend(me bool) {
+func (r *Raft) bcastAppend(me bool, null bool) {
 	r.Visit(func(idx int, to uint64) {
-		r.sendAppend(to)
+		r.sendAppend(to, null)
 	}, me)
 }
 

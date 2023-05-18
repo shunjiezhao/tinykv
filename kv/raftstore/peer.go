@@ -125,6 +125,7 @@ func NewPeer(storeId uint64, cfg *config.Config, engines *engine_util.Engines, r
 	}
 
 	appliedIndex := ps.AppliedIndex()
+	log.Infof("%v apply index %d", tag, appliedIndex)
 
 	raftCfg := &raft.Config{
 		ID:            meta.GetId(),

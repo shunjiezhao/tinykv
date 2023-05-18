@@ -213,7 +213,7 @@ func (rn *RawNode) HasReady() bool {
 	}
 
 	// 检查是否有term,vote变化
-	if rn.hardState.Term != rn.Raft.Term || rn.hardState.Vote != rn.Raft.Vote {
+	if rn.hardState.Term != rn.Raft.Term || rn.hardState.Vote != rn.Raft.Vote || rn.hardState.Commit != rn.Raft.RaftLog.committed {
 		log.Infof("HasReady: hardState")
 		return true
 	}

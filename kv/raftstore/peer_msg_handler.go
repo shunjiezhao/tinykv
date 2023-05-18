@@ -100,7 +100,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		}
 
 		for _, en := range entry {
-			if pro := d.handlePro(*en); pro != nil {
+			if pro := d.handlePro(en); pro != nil && pro.cb != nil {
 				log.Infof("proposals %+v %+v", pro, resp[en])
 				if resp[en].CmdType == raft_cmdpb.CmdType_Snap {
 					pro.cb.Txn = d.peerStorage.Engines.Kv.NewTransaction(false)
@@ -118,7 +118,10 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	d.RaftGroup.Advance(ready)
 }
 
-func (d *peerMsgHandler) handlePro(entry pb.Entry) *proposal {
+func (d *peerMsgHandler) handlePro(entry *pb.Entry) *proposal {
+	if entry == nil {
+		log.Panicf("entry is nil")
+	}
 	for len(d.proposals) > 0 {
 		proposal := d.proposals[0]
 		if entry.Term < proposal.term {

@@ -120,7 +120,7 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 		log.Panicf("applied(%d) > committed(%d)]", l.applied, l.committed)
 	}
 	ents = l.entries[l.applied-l.start+1 : l.committed-l.start+1]
-	log.Debugf("nextEnts: {%d:%d} start: %d", l.applied, l.committed, l.start)
+	log.Infof("nextEnts: {%d:%d} start: %d", l.applied, l.committed, l.start)
 	return
 }
 
@@ -224,8 +224,8 @@ func (l *RaftLog) cutDown(index, term uint64) {
 		log.Warnf("cutDown: index(%d) > LastIndex(%d)", index, l.LastIndex())
 		cp = make([]pb.Entry, 1)
 	} else {
-		cp = make([]pb.Entry, l.LastIndex()-index-l.start+1)
 		log.Infof("cut down: %d, %d, %d, %d", index, l.LastIndex(), len(l.entries), len(cp))
+		cp = make([]pb.Entry, l.LastIndex()-index-l.start+1)
 	}
 	cp[0].Index, cp[0].Term = index, term
 	if index+1 < l.LastIndex() {

@@ -332,6 +332,7 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	// and send RegionTaskApply task to region worker through ps.regionSched, also remember call ps.clearMeta
 	// and ps.clearExtraData to delete stale data
 	// Your Code Here (2C).
+	log.Info("apply snapshot")
 	resp.PrevRegion = ps.region
 	metaData := snapshot.Metadata
 	if metaData != nil {
@@ -380,9 +381,11 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	if len(ready.Entries) > 0 {
 		mustNil(ps.Append(ready.Entries, rv))
 	}
+
 	// local state
 	if !raft.IsEmptyHardState(ready.HardState) {
 		ps.raftState.HardState = &ready.HardState
+		mustNil(rv.SetMeta(meta.RaftStateKey(ps.region.Id), ps.raftState))
 	}
 
 	if !raft.IsEmptySnap(&ready.Snapshot) {
