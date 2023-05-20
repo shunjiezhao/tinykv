@@ -217,20 +217,16 @@ func (l *RaftLog) updateCommitIndex(commit uint64) {
 	l.committed = commit
 }
 
-// cutDown cut down the log entries to (index,LastLogIndex]
-func (l *RaftLog) cutDown(index, term uint64) {
+// CutDown cut down the log entries to (index,LastLogIndex]
+func (l *RaftLog) CutDown(index, term uint64) {
 	var cp []pb.Entry
-	if index > l.LastIndex() {
-		log.Warnf("cutDown: index(%d) > LastIndex(%d)", index, l.LastIndex())
-		cp = make([]pb.Entry, 1)
-	} else {
-		log.Infof("cut down: %d, %d, %d, %d", index, l.LastIndex(), len(l.entries), len(cp))
-		cp = make([]pb.Entry, l.LastIndex()-index-l.start+1)
-	}
+	log.Infof("cut down: %d, %d, %d, %d", index, l.LastIndex(), len(l.entries), len(cp))
+	cp = make([]pb.Entry, max(1, l.LastIndex()-index-l.start+1))
 	cp[0].Index, cp[0].Term = index, term
 	if index+1 < l.LastIndex() {
-		copy(cp[1:], l.entries[index+1:])
+		copy(cp[1:], l.entries[index+1-l.start:])
 	}
+
 	l.entries = cp
 	l.start = index
 

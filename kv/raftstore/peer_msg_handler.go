@@ -87,7 +87,6 @@ func (d *peerMsgHandler) HandleRaftReady() {
 				} else {
 					log.Debug("empty log")
 				}
-
 			}
 
 			d.peerStorage.applyState.AppliedIndex = max(d.peerStorage.AppliedIndex(), ready.CommittedEntries[len(ready.CommittedEntries)-1].Index)
@@ -99,6 +98,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			panic(err)
 		}
 
+		// send response
 		for _, en := range entry {
 			if pro := d.handlePro(en); pro != nil && pro.cb != nil {
 				log.Infof("proposals %+v %+v", pro, resp[en])
@@ -112,7 +112,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 				log.Debug("proposals done", pro)
 			}
 		}
-
+		// cut down apply log
 	}
 
 	d.RaftGroup.Advance(ready)

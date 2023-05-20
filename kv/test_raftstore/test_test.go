@@ -408,15 +408,14 @@ func TestOnePartition2B(t *testing.T) {
 	log.Warnf("done5")
 }
 
-func TestManyTimes(t *testing.T) {
-	t.Parallel()
-	for i := 0; i < 100; i++ {
-		t.Run(fmt.Sprintf("test-%d", i), func(t *testing.T) {
-			TestOnePartition2B(t)
-		})
-	}
-}
-
+//	func TestManyTimes(t *testing.T) {
+//		t.Parallel()
+//		for i := 0; i < 100; i++ {
+//			t.Run(fmt.Sprintf("test-%d", i), func(t *testing.T) {
+//				TestOnePartition2B(t)
+//			})
+//		}
+//	}
 func TestManyPartitionsOneClient2B(t *testing.T) {
 	// Test: partitions, one client (2B) ...
 	GenericTest(t, "2B", 1, false, false, true, -1, false, false)

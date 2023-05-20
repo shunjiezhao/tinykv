@@ -285,10 +285,7 @@ func (r *Raft) tick() {
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
 	r.step = stepFollower
-	// 1. 任期
 	r.reset(term)
-	// 2. 投票
-	// 3. leadId
 	r.Lead = lead
 	r.electionElapsed = 0   // 清空选举超时
 	r.State = StateFollower // 状态改变
@@ -485,9 +482,9 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 		r.Prs = prs
 	}
 
-	r.RaftLog.cutDown(index, term)
+	r.RaftLog.CutDown(index, term)
 	log.Infof("%s cut down log to %d", r.Info(), index)
-	// todo: send response to leader
+	r.send(r.NewRespAppendMsg(m.From, r.RaftLog.committed, false))
 }
 
 // addNode add a new node to raft group
