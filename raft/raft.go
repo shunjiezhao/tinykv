@@ -497,11 +497,41 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 // addNode add a new node to raft group
 func (r *Raft) addNode(id uint64) {
 	// Your Code Here (3A).
+	r.checkPeersAccordPrs()
+	if _, ok := r.Prs[id]; ok {
+		return
+	}
+	r.Prs[id] = &Progress{
+		Match: 0,
+		Next:  r.RaftLog.LastIndex() + 1,
+	}
+	r.peers = append(r.peers, id)
+}
+func (r *Raft) checkPeersAccordPrs() {
+	for _, i := range r.peers {
+		if _, ok := r.Prs[i]; !ok {
+			log.Panicf("add node %d but not in peers", i)
+		}
+	}
 }
 
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
+	r.checkPeersAccordPrs()
+	if _, ok := r.Prs[id]; !ok {
+		return
+	}
+	delete(r.Prs, id)
+	for i, v := range r.peers {
+		if v == id {
+			r.peers = append(r.peers[:i], r.peers[i+1:]...)
+			break
+		}
+	}
+	// update commit
+	r.updateCommit()
+
 }
 
 func (r *Raft) bcastAppend(me bool, null bool) {
