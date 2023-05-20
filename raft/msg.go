@@ -96,3 +96,20 @@ func (r *Raft) NewRespAppendMsg(to, index uint64, reject bool) pb.Message {
 		Index:   index,
 	}
 }
+
+func (r *Raft) NewTimeOutMsg(to uint64) pb.Message {
+	return pb.Message{
+		MsgType: pb.MessageType_MsgTimeoutNow,
+		To:      to,
+		Term:    r.Term,
+	}
+}
+
+func (r *Raft) NewHupMsg() pb.Message {
+	if r.State != StateFollower {
+		log.Panicf("you state %s not leader", r.Info())
+	}
+	return pb.Message{
+		MsgType: pb.MessageType_MsgHup,
+	}
+}

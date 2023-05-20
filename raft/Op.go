@@ -46,11 +46,18 @@ func (r *Raft) Step(m pb.Message) error {
 		if r.State == StateLeader {
 			r.bckstHeart()
 		}
-
+	case pb.MessageType_MsgPropose:
+		// if leader want to transfer
+		if r.State != StateLeader || r.leadTransferee != None {
+			return ErrProposalDropped
+		}
+		r.handleProse(m)
+		r.bcastAppend(false, false)
 	default:
 		err := r.step(r, m)
 		if err != nil {
-			log.Errorf("")
+			log.Error(err)
+			return err
 		}
 	}
 	// Your Code Here (2A).
@@ -70,7 +77,18 @@ func stepFollower(r *Raft, m pb.Message) error {
 	case pb.MessageType_MsgAppend:
 		r.becomeFollower(m.Term, m.From)
 		r.handleAppendEntries(m)
-
+	case pb.MessageType_MsgTimeoutNow:
+		// need to hup
+		if r.Alive() {
+			mustBeNil(r.Step(r.NewHupMsg()))
+		}
+	case pb.MessageType_MsgTransferLeader:
+		if r.Lead == None {
+			log.Infof("%x no leader at term %d; dropping leader transfer msg", r.id, r.Term)
+			return nil
+		}
+		m.To = r.Lead
+		r.send(m)
 	}
 	return nil
 }
@@ -114,9 +132,6 @@ func stepLeader(r *Raft, m pb.Message) error {
 	}
 
 	switch m.MsgType {
-	case pb.MessageType_MsgPropose:
-		r.handleProse(m)
-		r.bcastAppend(false, false)
 	case pb.MessageType_MsgBeat:
 		r.bckstHeart()
 	case pb.MessageType_MsgAppendResponse:
@@ -134,6 +149,11 @@ func stepLeader(r *Raft, m pb.Message) error {
 				log.Debugf("get commit :%d", newCommit)
 				r.bcastAppend(false, true)
 			}
+			if r.leadTransferee == m.From && r.Prs[m.From].Match == r.RaftLog.LastIndex() {
+				log.Debugf("%s sent MsgTimeoutNow to %d because already up-to-date", r.Info(), m.From)
+				r.sendTimeoutNow(m.From)
+				r.heartbeatElapsed = 0 // reset heartbeatElapsed
+			}
 		} else {
 			pr.Next--
 			log.Infof("rejectLog")
@@ -143,7 +163,70 @@ func stepLeader(r *Raft, m pb.Message) error {
 	case pb.MessageType_MsgHeartbeatResponse:
 		// 1. 追赶日志
 		r.sendAppend(m.From, false)
+
+	case pb.MessageType_MsgTransferLeader:
+		if _, ok := r.Prs[m.From]; !ok {
+			log.Warnf("%s no progress of %d", r.Info(), m.From)
+			return ErrProposalDropped // not in prs
+		}
+		newTransfer, oldTransfer := m.From, r.leadTransferee
+		if oldTransfer != None {
+			if newTransfer == oldTransfer {
+				// transfer is in progress
+				log.Warnf("%s leader transfer is in progress, ignore %s", r.Info(), MessageStr(r, m))
+				return nil
+			}
+			// abort previous transfer
+			r.resetTransfer(None)
+		}
+		if newTransfer == r.id {
+			log.Infof("%s is already leader. Ignored transferring request from self", r.Info())
+			return nil
+		}
+		// transfer
+		// 1. reset transfer
+		if err := r.resetTransfer(newTransfer); err != nil {
+			return err
+		}
+		// 2. reset timeout
+		r.heartbeatElapsed = 0
+		// compare log
+		if r.Prs[newTransfer].Match == r.RaftLog.LastIndex() {
+			// log is up-to-date
+			log.Debugf("%s sent MsgTimeoutNow to %s because already up-to-date", r.Info(), MessageStr(r, m))
+			r.sendTimeoutNow(newTransfer)
+		} else {
+			r.send(r.NewAppendMsg(newTransfer)) // send append msg
+		}
 	}
 
 	return nil
+}
+
+func (r *Raft) resetTransfer(id uint64) error {
+	if id == r.leadTransferee {
+		log.Infof("%s  previous leader transfer = next", r.Info())
+		return nil
+	}
+	if id == r.id {
+		log.Panicf("%s is already leader. Ignored transferring request from self", r.Info())
+	}
+	if id == None {
+		log.Infof("%s  cancel leader transfer", r.Info())
+		r.leadTransferee = None
+		return nil
+	}
+	for _, peer := range r.peers {
+		if peer == id {
+			log.Infof("%s  leader transfer { %d -> %d }", r.Info(), r.leadTransferee, id)
+			r.leadTransferee = id
+			return nil
+		}
+
+	}
+	return ErrProposalDropped
+}
+
+func (r *Raft) sendTimeoutNow(id uint64) {
+	r.send(r.NewTimeOutMsg(id))
 }

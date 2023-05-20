@@ -185,7 +185,8 @@ func MessageStr(r *Raft, m pb.Message) string {
 
 	case pb.MessageType_MsgAppendResponse:
 		return fmt.Sprintf("[AppendRespons] {Commit: %v} {Reject: %v} %v to %v", r.RaftLog.committed, m.Reject, m.From, m.To)
-
+	case pb.MessageType_MsgTimeoutNow:
+		return fmt.Sprintf("[TimeoutNow] {to %v}", m.To)
 	}
 	return m.String()
 }

@@ -1324,6 +1324,7 @@ func TestLeaderTransferToUpToDateNodeFromFollower3A(t *testing.T) {
 	if lead.Lead != 1 {
 		t.Fatalf("after election leader is %d, want 1", lead.Lead)
 	}
+	log.SetLevel(log.LOG_LEVEL_ALL)
 
 	// Transfer leadership to 2.
 	nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgTransferLeader})
@@ -1339,6 +1340,7 @@ func TestLeaderTransferToUpToDateNodeFromFollower3A(t *testing.T) {
 }
 
 func TestLeaderTransferToSlowFollower3A(t *testing.T) {
+	log.SetLevel(log.LOG_LEVEL_ALL)
 	nt := newNetwork(nil, nil, nil)
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 

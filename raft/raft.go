@@ -204,10 +204,11 @@ func newRaft(c *Config) *Raft {
 	if len(cfg.Nodes) != 0 {
 		raft.peers = cfg.Nodes
 	}
+	raft.resetPrs()
+
 	raft.step = stepFollower
 	raft.reset(state.Term)
 	raft.Vote = state.Vote
-	raft.resetPrs()
 
 	log.Debug("New Raft %+v\n", raft)
 	return raft
@@ -262,6 +263,11 @@ func (r *Raft) tickLeader() {
 		log.Debug("send heartbeat")
 		if err := r.Step(pb.Message{MsgType: pb.MessageType_MsgBeat}); err != nil {
 			log.Panic(err)
+		}
+
+		if r.leadTransferee != None {
+			log.Debugf("target transfer leader %d is not alive", r.leadTransferee)
+			r.leadTransferee = None
 		}
 	}
 }
@@ -319,6 +325,7 @@ func (r *Raft) becomeLeader() {
 	r.electionElapsed = 0
 	// 3. lead = me
 	r.Lead = r.id
+	r.leadTransferee = None
 	entry := &pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1, Data: nil}
 	r.leaderAppendEntries(entry)
 	if len(r.peers) == 1 {
@@ -555,4 +562,13 @@ func (r *Raft) resetRandomizedElectionTimeout() {
 
 func (r *Raft) pastElectionTimeout() bool {
 	return r.electionElapsed >= r.randomizedElectionTimeout
+}
+
+func (r *Raft) Alive() bool {
+	for _, peer := range r.peers {
+		if peer == r.id {
+			return true
+		}
+	}
+	return false
 }
