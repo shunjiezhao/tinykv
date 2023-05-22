@@ -451,90 +451,90 @@ func TestPersistPartitionUnreliable2B(t *testing.T) {
 	GenericTest(t, "2B", 5, true, true, true, -1, false, false)
 }
 
-//	func TestOneSnapshot2C(t *testing.T) {
-//		cfg := config.NewTestConfig()
-//		cfg.RaftLogGcCountLimit = 10
-//		cluster := NewTestCluster(3, cfg)
-//		cluster.Start()
-//		defer cluster.Shutdown()
-//
-//		cf := engine_util.CfLock
-//		cluster.MustPutCF(cf, []byte("k1"), []byte("v1"))
-//		cluster.MustPutCF(cf, []byte("k2"), []byte("v2"))
-//
-//		MustGetCfEqual(cluster.engines[1], cf, []byte("k1"), []byte("v1"))
-//		MustGetCfEqual(cluster.engines[1], cf, []byte("k2"), []byte("v2"))
-//
-//		for _, engine := range cluster.engines {
-//			state, err := meta.GetApplyState(engine.Kv, 1)
-//			if err != nil {
-//				t.Fatal(err)
-//			}
-//			if state.TruncatedState.Index != meta.RaftInitLogIndex ||
-//				state.TruncatedState.Term != meta.RaftInitLogTerm {
-//				t.Fatalf("unexpected truncated state %v", state.TruncatedState)
-//			}
-//		}
-//
-//		cluster.AddFilter(
-//			&PartitionFilter{
-//				s1: []uint64{1},
-//				s2: []uint64{2, 3},
-//			},
-//		)
-//
-//		// write some data to trigger snapshot
-//		for i := 100; i < 115; i++ {
-//			cluster.MustPutCF(cf, []byte(fmt.Sprintf("k%d", i)), []byte(fmt.Sprintf("v%d", i)))
-//		}
-//		cluster.MustDeleteCF(cf, []byte("k2"))
-//		time.Sleep(500 * time.Millisecond)
-//		MustGetCfNone(cluster.engines[1], cf, []byte("k100"))
-//		cluster.ClearFilters()
-//
-//		// Now snapshot must applied on
-//		MustGetCfEqual(cluster.engines[1], cf, []byte("k1"), []byte("v1"))
-//		MustGetCfEqual(cluster.engines[1], cf, []byte("k100"), []byte("v100"))
-//		MustGetCfNone(cluster.engines[1], cf, []byte("k2"))
-//
-//		cluster.StopServer(1)
-//		cluster.StartServer(1)
-//
-//		MustGetCfEqual(cluster.engines[1], cf, []byte("k1"), []byte("v1"))
-//		for i, engine := range cluster.engines {
-//			state, err := meta.GetApplyState(engine.Kv, 1)
-//			if err != nil {
-//				t.Fatal(err)
-//			}
-//			truncatedIdx := state.TruncatedState.Index
-//			appliedIdx := state.AppliedIndex
-//			if appliedIdx-truncatedIdx > 2*uint64(cfg.RaftLogGcCountLimit) {
-//				t.Log(i)
-//				t.Fatalf("logs were not trimmed (%v - %v > 2*%v)", appliedIdx, truncatedIdx, cfg.RaftLogGcCountLimit)
-//			}
-//		}
-//	}
-//
-//	func TestSnapshotRecover2C(t *testing.T) {
-//		// Test: restarts, snapshots, one client (2C) ...
-//		log.SetLevel(log.LOG_LEVEL_ALL)
-//		GenericTest(t, "2C", 1, false, true, false, 100, false, false)
-//	}
-//
-//	func TestSnapshotRecoverManyClients2C(t *testing.T) {
-//		// Test: restarts, snapshots, many clients (2C) ...
-//		GenericTest(t, "2C", 20, false, true, false, 100, false, false)
-//	}
-//
-//	func TestSnapshotUnreliable2C(t *testing.T) {
-//		// Test: unreliable net, snapshots, many clients (2C) ...
-//		GenericTest(t, "2C", 5, true, false, false, 100, false, false)
-//	}
-//
-//	func TestSnapshotUnreliableRecover2C(t *testing.T) {
-//		// Test: unreliable net, restarts, snapshots, many clients (2C) ...
-//		GenericTest(t, "2C", 5, true, true, false, 100, false, false)
-//	}
+func TestOneSnapshot2C(t *testing.T) {
+	cfg := config.NewTestConfig()
+	cfg.RaftLogGcCountLimit = 10
+	cluster := NewTestCluster(3, cfg)
+	cluster.Start()
+	defer cluster.Shutdown()
+
+	cf := engine_util.CfLock
+	cluster.MustPutCF(cf, []byte("k1"), []byte("v1"))
+	cluster.MustPutCF(cf, []byte("k2"), []byte("v2"))
+
+	MustGetCfEqual(cluster.engines[1], cf, []byte("k1"), []byte("v1"))
+	MustGetCfEqual(cluster.engines[1], cf, []byte("k2"), []byte("v2"))
+
+	for _, engine := range cluster.engines {
+		state, err := meta.GetApplyState(engine.Kv, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.TruncatedState.Index != meta.RaftInitLogIndex ||
+			state.TruncatedState.Term != meta.RaftInitLogTerm {
+			t.Fatalf("unexpected truncated state %v", state.TruncatedState)
+		}
+	}
+
+	cluster.AddFilter(
+		&PartitionFilter{
+			s1: []uint64{1},
+			s2: []uint64{2, 3},
+		},
+	)
+
+	// write some data to trigger snapshot
+	for i := 100; i < 115; i++ {
+		cluster.MustPutCF(cf, []byte(fmt.Sprintf("k%d", i)), []byte(fmt.Sprintf("v%d", i)))
+	}
+	cluster.MustDeleteCF(cf, []byte("k2"))
+	time.Sleep(500 * time.Millisecond)
+	MustGetCfNone(cluster.engines[1], cf, []byte("k100"))
+	cluster.ClearFilters()
+
+	// Now snapshot must applied on
+	MustGetCfEqual(cluster.engines[1], cf, []byte("k1"), []byte("v1"))
+	MustGetCfEqual(cluster.engines[1], cf, []byte("k100"), []byte("v100"))
+	MustGetCfNone(cluster.engines[1], cf, []byte("k2"))
+
+	cluster.StopServer(1)
+	cluster.StartServer(1)
+
+	MustGetCfEqual(cluster.engines[1], cf, []byte("k1"), []byte("v1"))
+	for i, engine := range cluster.engines {
+		state, err := meta.GetApplyState(engine.Kv, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		truncatedIdx := state.TruncatedState.Index
+		appliedIdx := state.AppliedIndex
+		if appliedIdx-truncatedIdx > 2*uint64(cfg.RaftLogGcCountLimit) {
+			t.Log(i)
+			t.Fatalf("logs were not trimmed (%v - %v > 2*%v)", appliedIdx, truncatedIdx, cfg.RaftLogGcCountLimit)
+		}
+	}
+}
+
+func TestSnapshotRecover2C(t *testing.T) {
+	// Test: restarts, snapshots, one client (2C) ...
+	log.SetLevel(log.LOG_LEVEL_ALL)
+	GenericTest(t, "2C", 1, false, true, false, 100, false, false)
+}
+
+func TestSnapshotRecoverManyClients2C(t *testing.T) {
+	// Test: restarts, snapshots, many clients (2C) ...
+	GenericTest(t, "2C", 20, false, true, false, 100, false, false)
+}
+
+func TestSnapshotUnreliable2C(t *testing.T) {
+	// Test: unreliable net, snapshots, many clients (2C) ...
+	GenericTest(t, "2C", 5, true, false, false, 100, false, false)
+}
+
+func TestSnapshotUnreliableRecover2C(t *testing.T) {
+	// Test: unreliable net, restarts, snapshots, many clients (2C) ...
+	GenericTest(t, "2C", 5, true, true, false, 100, false, false)
+}
 func TestSnapshotUnreliableRecoverConcurrentPartition2C(t *testing.T) {
 	// Test: unreliable net, restarts, partitions, snapshots, many clients (2C) ...
 	GenericTest(t, "2C", 5, true, true, true, 100, false, false)

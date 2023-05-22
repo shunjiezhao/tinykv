@@ -109,13 +109,6 @@ func (d *peerMsgHandler) HandleRaftReady() {
 						addNode = cc.NodeId
 
 					} else if cc.ChangeType == pb.ConfChangeType_RemoveNode && index != -1 {
-						//if cc.NodeId == d.peer.PeerId() {
-						//	addNode = util.InvalidID
-						//	d.destroyPeer() // remove self
-						//	return nil
-						//}
-						//region.Peers = append(region.Peers[:index], region.Peers[index+1:]...)
-						//d.removePeerCache(cc.NodeId)
 						removeSelf = cc.NodeId == d.peer.PeerId()
 						region.Peers = append(region.Peers[:index], region.Peers[index+1:]...)
 						d.removePeerCache(cc.NodeId)
@@ -141,13 +134,11 @@ func (d *peerMsgHandler) HandleRaftReady() {
 						}
 					}
 				} else {
-					// normal entry
 					request := raft_cmdpb.RaftCmdRequest{}
 					mustNil(request.Unmarshal(en.Data))
 					log.Debugf("handle raft ready %+v", request)
 					if request.AdminRequest != nil {
 						adminResp[&en] = d.handleAdminReq(request.AdminRequest)
-						log.Infof("amdin request %+v", request.AdminRequest)
 					} else if len(request.Requests) > 0 {
 						resp[&en] = d.handleReq(&request, txn)
 					} else {
