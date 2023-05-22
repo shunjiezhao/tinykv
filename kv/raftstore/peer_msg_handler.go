@@ -62,14 +62,22 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	}
 
 	regionState, err := d.peer.peerStorage.SaveReadyState(&ready)
-	mustNil(err)
-	if regionState != nil && regionState.Region != nil {
-		d.SetRegion(regionState.Region) // set new region
+	updateMeta := func(shouldNotify bool) {
 		meta := d.ctx.storeMeta
 		meta.Lock()
 		meta.regionRanges.ReplaceOrInsert(&regionItem{region: d.Region()})
 		meta.regions[d.regionId] = d.Region()
 		meta.Unlock()
+		if shouldNotify {
+			d.notifyHeartbeatScheduler(d.Region(), d.peer)
+		}
+	}
+	mustNil(err)
+	if regionState != nil {
+		if d.Region() != regionState.Region {
+			panic("")
+		}
+		updateMeta(false)
 	}
 
 	d.Send(d.ctx.trans, ready.Messages)
@@ -81,11 +89,19 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		db := d.peerStorage.Engines.Kv
 		removeSelf := false
 		var entry []*pb.Entry
+		var modify bool
 		if err := db.Update(func(txn *badger.Txn) error {
 			for _, en := range ready.CommittedEntries {
+				if d.stopped {
+					return nil
+				}
 				entry = append(entry, &en)
 				if en.EntryType == pb.EntryType_EntryConfChange {
+					if modify { // for debug
+						panic("")
+					}
 
+					modify = true
 					var cc pb.ConfChange
 					mustNil(cc.Unmarshal(en.Data))
 
@@ -105,14 +121,17 @@ func (d *peerMsgHandler) HandleRaftReady() {
 						pe := &metapb.Peer{Id: cc.NodeId, StoreId: cc.StoreId}
 						region.Peers = append(region.Peers, pe)
 						d.insertPeerCache(pe)
-						log.Infof("insert peer cache %+v", pe)
+						log.Infof("%d insert peer %d", d.PeerId(), cc.NodeId)
 						addNode = cc.NodeId
-
 					} else if cc.ChangeType == pb.ConfChangeType_RemoveNode && index != -1 {
-						removeSelf = cc.NodeId == d.peer.PeerId()
+						removeSelf = cc.NodeId == d.PeerId()
 						region.Peers = append(region.Peers[:index], region.Peers[index+1:]...)
+						log.Infof("%d remove peer index: %d", d.PeerId(), cc.NodeId)
 						d.removePeerCache(cc.NodeId)
 					}
+					log.Infof("%d %d %+v", d.peer.PeerId(), region.RegionEpoch.ConfVer, region.Peers)
+					updateMeta(true)
+
 					// set new region
 					state := new(rspb.RegionLocalState)
 
@@ -123,15 +142,11 @@ func (d *peerMsgHandler) HandleRaftReady() {
 					state.Region = region
 					data, _ := state.Marshal()
 					mustNil(txn.Set(meta.RegionStateKey(region.Id), data))
-
-					d.notifyHeartbeatScheduler(region, d.peer)
 					if removeSelf {
 						d.destroyPeer()
 						return nil
-					} else {
-						if addNode != util.InvalidID && d.RaftGroup.Raft.State == raft.StateLeader {
-							d.RaftGroup.Raft.AppendEmptyEntryAndBckst()
-						}
+					} else if addNode != util.InvalidID && d.RaftGroup.Raft.State == raft.StateLeader {
+						d.RaftGroup.Raft.AppendEmptyEntryAndBckst()
 					}
 				} else {
 					request := raft_cmdpb.RaftCmdRequest{}
@@ -184,17 +199,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	d.RaftGroup.Advance(ready)
 }
 func (d *peerMsgHandler) notifyHeartbeatScheduler(region *metapb.Region, peer *peer) {
-	clonedRegion := new(metapb.Region)
-	err := util.CloneMsg(region, clonedRegion)
-	if err != nil {
-		return
-	}
-	d.ctx.schedulerTaskSender <- &runner.SchedulerRegionHeartbeatTask{
-		Region:          clonedRegion,
-		Peer:            peer.Meta,
-		PendingPeers:    peer.CollectPendingPeers(),
-		ApproximateSize: peer.ApproximateSize,
-	}
+	d.HeartbeatScheduler(d.ctx.schedulerTaskSender)
 }
 func (d *peerMsgHandler) handlePro(entry *pb.Entry) *proposal {
 	if entry == nil {
@@ -273,12 +278,15 @@ func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest) *raft_cmdp
 	case raft_cmdpb.AdminCmdType_ChangePeer:
 		change := req.ChangePeer
 		log.Infof("%+v", change)
-		if err := d.RaftGroup.ProposeConfChange(pb.ConfChange{
-			ChangeType: change.ChangeType,
-			NodeId:     change.Peer.Id,
-			StoreId:    change.Peer.StoreId,
-		}); err != nil {
-			log.Panicf("propose conf change error %v", err)
+		if d.RaftGroup.Raft.CanChangeConf() {
+			d.RaftGroup.Raft.SetConfIndex(d.RaftGroup.Raft.RaftLog.NextIndex())
+			if err := d.RaftGroup.ProposeConfChange(pb.ConfChange{
+				ChangeType: change.ChangeType,
+				NodeId:     change.Peer.Id,
+				StoreId:    change.Peer.StoreId,
+			}); err != nil {
+				log.Panicf("propose conf change error %v", err)
+			}
 		}
 
 	default:

@@ -332,8 +332,10 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	// Your Code Here (2C).
 
 	log.Info("apply snapshot")
-	mustNil(ps.clearMeta(kvWB, raftWB))
-	ps.clearExtraData(ps.region)
+	if ps.isInitialized() {
+		mustNil(ps.clearMeta(kvWB, raftWB))
+		ps.clearExtraData(ps.region)
+	}
 
 	resp.PrevRegion = ps.region
 	metaData := snapshot.Metadata
