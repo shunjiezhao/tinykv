@@ -34,7 +34,6 @@ func NotifyReqRegionRemoved(regionId uint64, cb *message.Callback) {
 // for this store.
 func createPeer(storeID uint64, cfg *config.Config, sched chan<- worker.Task,
 	engines *engine_util.Engines, region *metapb.Region) (*peer, error) {
-	log.Debug("createPeer: ", region.Peers)
 	metaPeer := util.FindPeer(region, storeID)
 	if metaPeer == nil {
 		return nil, errors.Errorf("find no peer for store %d in region %v", storeID, region)
