@@ -162,6 +162,7 @@ func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
 		return nil, ErrCompacted
 	}
 	if index > l.LastIndex() { // exceed
+		log.Warnf("entryAt: {index:%d} > {LastIndex:%d}", index, l.LastIndex())
 		return nil, ErrUnavailable
 	}
 

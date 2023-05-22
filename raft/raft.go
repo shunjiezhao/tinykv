@@ -244,7 +244,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 }
 
 func (r *Raft) Visit(f func(idx int, to uint64), sendMe bool) {
-	for idx, to := range r.peers {
+	for idx, to := range nodes(r) {
 		if r.id == to && sendMe == false {
 			continue
 		}
@@ -293,7 +293,8 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.step = stepFollower
 	r.reset(term)
 	r.Lead = lead
-	r.electionElapsed = 0   // 清空选举超时
+	r.electionElapsed = 0 // 清空选举超时
+	r.leadTransferee = None
 	r.State = StateFollower // 状态改变
 	if r.Term != 0 {
 		log.Infof("%s became %s at term %d Lead:%d", r.Info(), r.State, r.Term, lead)
@@ -306,6 +307,7 @@ func (r *Raft) becomeCandidate() {
 	r.step = stepCandidate
 	r.reset(r.Term + 1)
 	r.State = StateCandidate
+	r.leadTransferee = None
 	r.Vote = r.id
 	r.votes = map[uint64]bool{} // RESET
 	log.Infof("%s became candidate at term %d", r.Info(), r.Term)
@@ -328,7 +330,7 @@ func (r *Raft) becomeLeader() {
 	r.leadTransferee = None
 	entry := &pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1, Data: nil}
 	r.leaderAppendEntries(entry)
-	if len(r.peers) == 1 {
+	if len(nodes(r)) == 1 {
 		log.Infof("single node")
 		r.updateCommit()
 	}
@@ -339,19 +341,19 @@ func (r *Raft) becomeLeader() {
 func (r *Raft) updateCommit() uint64 {
 	prev := r.RaftLog.committed // for debug
 	start := max(prev+1, r.RaftLog.First())
-
+	allNodes := nodes(r)
 	for index := start; index <= r.RaftLog.LastIndex(); index++ {
 		if r.RaftLog.entries[index-r.RaftLog.start].Term != r.Term {
 			continue
 		}
 		var count = 1
-		for _, id := range r.peers {
+		for _, id := range allNodes {
 			if id != r.id && r.Prs[id].Match >= index {
 				count++
 			}
 		}
 		// 假设存在 N 满足N > CommitIndex，使得大多数的 matchIndex[i] ≥ N以及log[N].term == CurrentTerm 成立，则令 CommitIndex = N（5.3 和 5.4 节）
-		if count > len(r.peers)/2 {
+		if count > len(allNodes)/2 {
 			r.RaftLog.committed = index
 			log.Debugf("%s update commit to %d", r.Info(), r.RaftLog.committed)
 		}
@@ -370,7 +372,7 @@ func (r *Raft) hup() {
 		return
 	}
 	r.becomeCandidate()
-	for _, id := range r.peers {
+	for _, id := range nodes(r) {
 		if id == r.id {
 			r.Step(r.NewRespVoteMsg(r.id, false))
 			continue
@@ -452,13 +454,36 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleProse(m pb.Message) {
+	if m.Entries == nil {
+		log.Panicf("recv prose is nil")
+	}
+	var confChangeIndex []uint64
+	for _, entry := range m.Entries {
+		if entry.EntryType == pb.EntryType_EntryConfChange {
+			confChangeIndex = append(confChangeIndex, entry.Index)
+		}
+	}
+
+	if len(confChangeIndex) > 1 {
+		log.Panicf("don't propose 2 conf change in one propose")
+	}
+	if len(confChangeIndex) == 1 {
+		if r.RaftLog.applied >= r.PendingConfIndex {
+			log.Infof("%s apply conf change", r.Info())
+			r.PendingConfIndex = confChangeIndex[0]
+		} else {
+			log.Infof("%s previous change is not applied", r.Info())
+			return
+		}
+	}
+
 	r.leaderAppendEntries(m.Entries...)
-	if len(r.peers) == 1 {
+	if len(nodes(r)) == 1 {
 		r.updateCommit()
 	}
 }
 func (r *Raft) handleSnapshot(m pb.Message) {
-	log.Debug("handleSnapshot")
+	log.Info("handleSnapshot")
 	// Your Code Here (2C).
 	if m.Snapshot == nil || m.Snapshot.Metadata == nil {
 		log.Panicf("recv snapshot is nil")
@@ -497,7 +522,6 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 // addNode add a new node to raft group
 func (r *Raft) addNode(id uint64) {
 	// Your Code Here (3A).
-	r.checkPeersAccordPrs()
 	if _, ok := r.Prs[id]; ok {
 		return
 	}
@@ -505,32 +529,16 @@ func (r *Raft) addNode(id uint64) {
 		Match: 0,
 		Next:  r.RaftLog.LastIndex() + 1,
 	}
-	r.peers = append(r.peers, id)
-}
-func (r *Raft) checkPeersAccordPrs() {
-	for _, i := range r.peers {
-		if _, ok := r.Prs[i]; !ok {
-			log.Panicf("add node %d but not in peers", i)
-		}
-	}
 }
 
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
-	r.checkPeersAccordPrs()
-	if _, ok := r.Prs[id]; !ok {
-		return
-	}
 	delete(r.Prs, id)
-	for i, v := range r.peers {
-		if v == id {
-			r.peers = append(r.peers[:i], r.peers[i+1:]...)
-			break
-		}
+	if r.State == StateLeader {
+		// update commit
+		r.updateCommit()
 	}
-	// update commit
-	r.updateCommit()
 
 }
 
@@ -595,10 +603,14 @@ func (r *Raft) pastElectionTimeout() bool {
 }
 
 func (r *Raft) Alive() bool {
-	for _, peer := range r.peers {
+	for _, peer := range nodes(r) {
 		if peer == r.id {
 			return true
 		}
 	}
 	return false
+}
+
+func (r *Raft) ID() uint64 {
+	return r.id
 }

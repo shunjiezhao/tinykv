@@ -368,6 +368,7 @@ func (c *Cluster) Scan(start, end []byte) [][]byte {
 			panic(resp.Header.Error)
 		}
 		if len(resp.Responses) != 1 {
+			log.Infof("req:%+v resp.Responses: %+v", req, resp.Responses)
 			panic("len(resp.Responses) != 1")
 		}
 		if resp.Responses[0].CmdType != raft_cmdpb.CmdType_Snap {

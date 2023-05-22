@@ -2,6 +2,7 @@ package raft
 
 import (
 	"errors"
+	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -13,7 +14,7 @@ func (r *Raft) NewHeartbeatMsg(to uint64) pb.Message {
 	return pb.Message{
 		MsgType: pb.MessageType_MsgHeartbeat,
 		To:      to,
-		Commit:  r.RaftLog.committed,
+		Commit:  util.RaftInvalidIndex,
 	}
 }
 func (r *Raft) NewRespHeartbeatMsg(to uint64) pb.Message {
@@ -63,7 +64,6 @@ func (r *Raft) NewAppendMsg(to uint64) pb.Message {
 			snapshot, err := storage.Snapshot()
 			if err != nil {
 				if errors.Is(err, ErrSnapshotTemporarilyUnavailable) {
-					log.Errorf("%s send to %d {%d:%d} snapshot temporarily unavailable", r.Info(), to, pr.Next, r.RaftLog.LastIndex())
 					return r.NewHeartbeatMsg(to)
 				}
 				log.Panicf("%s send to %d {%d:%d} snapshot error %s", r.Info(), to, pr.Next, r.RaftLog.LastIndex(), err)
@@ -74,10 +74,11 @@ func (r *Raft) NewAppendMsg(to uint64) pb.Message {
 				Snapshot: &snapshot,
 			}
 		}
-		// todo: send snap?
-		log.Panic(r.Info(), "send to ", to, " can not get next ", err)
 	}
 	log.Infof("%s send log to %d {%d:%d}", r.Info(), to, pr.Next, r.RaftLog.LastIndex())
+	if prevLog == nil {
+		log.Panicf("%s send log to %d {%d:%d} prevLog is nil", r.Info(), to, pr.Next, r.RaftLog.LastIndex())
+	}
 
 	return pb.Message{
 		MsgType: pb.MessageType_MsgAppend,

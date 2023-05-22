@@ -376,7 +376,7 @@ func (m *MockSchedulerClient) handleHeartbeatConfVersion(region *metapb.Region) 
 				panic("unmatched conf version")
 			}
 			if searchRegion.RegionEpoch.Version+1 != region.RegionEpoch.Version {
-				panic("unmatched version")
+				log.Panicf("unmatched version, want: %v but: %v", searchRegion.RegionEpoch.Version+1, region.RegionEpoch.Version)
 			}
 		}
 

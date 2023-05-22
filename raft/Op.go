@@ -32,7 +32,7 @@ func (r *Raft) Step(m pb.Message) error {
 		canVote := r.Vote == m.From ||
 			// ...we haven't voted and we don't think there's a leader yet in this term...
 			(r.Vote == None && r.Lead == None)
-		log.Errorf("can vote: %v, log is old: %v", canVote, r.myLogIsOld(m.LogTerm, m.Index))
+		log.Infof("can vote: %v, log is old: %v", canVote, r.myLogIsOld(m.LogTerm, m.Index))
 		if canVote && r.myLogIsOld(m.LogTerm, m.Index) {
 			r.electionElapsed = 0
 			r.Vote = m.From
@@ -69,13 +69,16 @@ func stepFollower(r *Raft, m pb.Message) error {
 		log.Panicf("%s", r.Info())
 	}
 	switch m.MsgType {
+	case pb.MessageType_MsgBeat, pb.MessageType_MsgAppend:
+		r.becomeFollower(m.Term, m.From) // for test
+	}
+
+	switch m.MsgType {
 	case pb.MessageType_MsgPropose:
 		return ErrProposalDropped
 	case pb.MessageType_MsgHeartbeat:
-		r.becomeFollower(m.Term, m.From)
 		r.handleHeartbeat(m)
 	case pb.MessageType_MsgAppend:
-		r.becomeFollower(m.Term, m.From)
 		r.handleAppendEntries(m)
 	case pb.MessageType_MsgTimeoutNow:
 		// need to hup
@@ -98,13 +101,16 @@ func stepCandidate(r *Raft, m pb.Message) error {
 	}
 
 	switch m.MsgType {
+	case pb.MessageType_MsgBeat, pb.MessageType_MsgAppend:
+		r.becomeFollower(m.Term, m.From) // for test
+	}
+	switch m.MsgType {
 	case pb.MessageType_MsgPropose:
 		return ErrProposalDropped
 
 	case pb.MessageType_MsgBeat:
 		r.handleHeartbeat(m)
 	case pb.MessageType_MsgAppend:
-		r.becomeFollower(m.Term, m.From)
 		r.handleAppendEntries(m)
 
 	case pb.MessageType_MsgRequestVoteResponse:
@@ -216,7 +222,7 @@ func (r *Raft) resetTransfer(id uint64) error {
 		r.leadTransferee = None
 		return nil
 	}
-	for _, peer := range r.peers {
+	for _, peer := range nodes(r) {
 		if peer == id {
 			log.Infof("%s  leader transfer { %d -> %d }", r.Info(), r.leadTransferee, id)
 			r.leadTransferee = id
