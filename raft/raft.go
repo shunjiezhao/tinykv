@@ -328,7 +328,12 @@ func (r *Raft) becomeLeader() {
 	// 3. lead = me
 	r.Lead = r.id
 	r.leadTransferee = None
+	for _, n := range nodes(r) {
+		r.Prs[n].Next = r.RaftLog.LastIndex() + 1
+		r.Prs[n].Match = max(r.Prs[n].Match, 0)
+	}
 	r.appendEmptyEntry()
+
 	log.Infof("%s became %s at term %d", r.Info(), r.State, r.Term)
 }
 
@@ -570,6 +575,9 @@ func (r *Raft) leaderAppendEntries(es ...*pb.Entry) uint64 {
 		esA[i] = *es[i]
 	}
 	li = r.RaftLog.append(esA...)
+	if _, ok := r.Prs[r.id]; !ok { // for debug
+		panic("")
+	}
 	r.Prs[r.id].Next = li + 1
 	r.Prs[r.id].Match = li
 	return li
