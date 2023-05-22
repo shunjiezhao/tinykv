@@ -57,7 +57,7 @@ func (r *Raft) readMessages() []pb.Message {
 }
 
 func TestProgressLeader2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	r := newTestRaft(1, []uint64{1, 2}, 5, 1, NewMemoryStorage())
 	r.becomeCandidate()
 	r.becomeLeader()
@@ -310,7 +310,7 @@ func TestLogReplication2AB(t *testing.T) {
 }
 
 func TestSingleNodeCommit2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	tt := newNetwork(nil)
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("some data")}}})
@@ -910,7 +910,7 @@ func TestDisruptiveFollower2AA(t *testing.T) {
 }
 
 func TestHeartbeatUpdateCommit2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	tests := []struct {
 		failCnt    int
 		successCnt int
@@ -1010,7 +1010,7 @@ func TestLeaderIncreaseNext2AB(t *testing.T) {
 }
 
 func TestRestoreSnapshot2C(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	s := pb.Snapshot{
 		Metadata: &pb.SnapshotMetadata{
 			Index:     11, // magic number
@@ -1324,7 +1324,6 @@ func TestLeaderTransferToUpToDateNodeFromFollower3A(t *testing.T) {
 	if lead.Lead != 1 {
 		t.Fatalf("after election leader is %d, want 1", lead.Lead)
 	}
-	log.SetLevel(log.LOG_LEVEL_ALL)
 
 	// Transfer leadership to 2.
 	nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgTransferLeader})
@@ -1340,7 +1339,7 @@ func TestLeaderTransferToUpToDateNodeFromFollower3A(t *testing.T) {
 }
 
 func TestLeaderTransferToSlowFollower3A(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	nt := newNetwork(nil, nil, nil)
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 

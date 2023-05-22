@@ -86,7 +86,7 @@ func TestStartAsFollower2AA(t *testing.T) {
 // as heartbeat to all followers.
 // Reference: section 5.2
 func TestLeaderBcastBeat2AA(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	// heartbeat interval
 	hi := 1
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, hi, NewMemoryStorage())
@@ -129,7 +129,7 @@ func TestCandidateStartNewElection2AA(t *testing.T) {
 // round of RequestVote RPCs.
 // Reference: section 5.2
 func testNonleaderStartElection(t *testing.T, state StateType) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	// election timeout
 	et := 10
 	r := newTestRaft(1, []uint64{1, 2, 3}, et, 1, NewMemoryStorage())
@@ -404,7 +404,7 @@ func TestLeaderStartReplication2AB(t *testing.T) {
 // servers eventually find out.
 // Reference: section 5.3
 func TestLeaderCommitEntry2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	s := NewMemoryStorage()
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, s)
 	r.becomeCandidate()
@@ -621,7 +621,7 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 // Also, it writes the new entry into stable storage.
 // Reference: section 5.3
 func TestFollowerAppendEntries2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	tests := []struct {
 		index, term uint64
 		lterm       uint64
@@ -858,7 +858,7 @@ func TestVoter2AB(t *testing.T) {
 // current term are committed by counting replicas.
 // Reference: section 5.4.2
 func TestLeaderOnlyCommitsLogFromCurrentTerm2AB(t *testing.T) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	ents := []pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}}
 	tests := []struct {
 		index   uint64
@@ -896,7 +896,7 @@ func (s messageSlice) Less(i, j int) bool { return fmt.Sprint(s[i]) < fmt.Sprint
 func (s messageSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 func commitNoopEntry(r *Raft, s *MemoryStorage) {
-	log.SetLevel(log.LOG_LEVEL_ALL)
+
 	if r.State != StateLeader {
 		panic("it should only be used when it is the leader")
 	}
