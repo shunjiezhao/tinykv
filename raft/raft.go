@@ -197,7 +197,7 @@ func newRaft(c *Config) *Raft {
 		heartbeatTimeout: c.HeartbeatTick,
 		electionTimeout:  c.ElectionTick, // [el, 2*el-1]
 	}
-	raft.RaftLog.applied = c.Applied
+	raft.RaftLog.applied = max(c.Applied, raft.RaftLog.applied)
 	raft.PendingConfIndex = raft.RaftLog.applied
 
 	if raft.id == 0 {
