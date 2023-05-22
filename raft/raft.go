@@ -197,6 +197,9 @@ func newRaft(c *Config) *Raft {
 		heartbeatTimeout: c.HeartbeatTick,
 		electionTimeout:  c.ElectionTick, // [el, 2*el-1]
 	}
+	raft.RaftLog.applied = c.Applied
+	raft.PendingConfIndex = raft.RaftLog.applied
+
 	if raft.id == 0 {
 		log.Panicf("id is 0, can't not be raft")
 	}
@@ -630,4 +633,12 @@ func (r *Raft) Alive() bool {
 
 func (r *Raft) ID() uint64 {
 	return r.id
+}
+
+func (r *Raft) CanChangeConf() bool {
+	return r.PendingConfIndex <= r.RaftLog.applied
+}
+
+func (r *Raft) SetConfIndex(index uint64) {
+	r.PendingConfIndex = index
 }
