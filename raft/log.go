@@ -153,7 +153,7 @@ func (l *RaftLog) LastLog() pb.Entry {
 
 // if not in [First,LastLogIndex] return nil
 func (l *RaftLog) entryAt(index uint64) (*pb.Entry, error) {
-	log.Debugf("entryAt: {index:%d} {start:%d}", index, l.start)
+	log.Infof("entryAt: {index:%d} {start:%d}", index, l.start)
 	if index == l.start {
 		return &l.entries[0], nil
 	}
@@ -225,7 +225,7 @@ func (l *RaftLog) CutDown(index, term uint64) {
 	if l.LastIndex() < index {
 		cp = make([]pb.Entry, 1)
 	} else {
-		cp = make([]pb.Entry, l.LastIndex()-index-l.start+1)
+		cp = make([]pb.Entry, l.LastIndex()-index+1)
 	}
 	cp[0].Index, cp[0].Term = index, term
 	if index+1 < l.LastIndex() {

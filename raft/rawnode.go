@@ -120,6 +120,13 @@ func (rn *RawNode) Propose(data []byte) error {
 		Entries: []*pb.Entry{&ent}})
 }
 
+// Heart bckst heartbeat
+func (rn *RawNode) Heart() error {
+	return rn.Raft.Step(pb.Message{
+		MsgType: pb.MessageType_MsgBeat,
+	})
+}
+
 // ProposeConfChange proposes a config change.
 func (rn *RawNode) ProposeConfChange(cc pb.ConfChange) error {
 	data, err := cc.Marshal()

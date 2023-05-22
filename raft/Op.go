@@ -163,6 +163,12 @@ func stepLeader(r *Raft, m pb.Message) error {
 		} else {
 			pr.Next--
 			log.Infof("rejectLog")
+			if pr.Next < r.RaftLog.First() {
+				log.Infof("should send snapshot")
+				pr.Next = r.RaftLog.First()
+				r.SendSnapshot(m.From)
+				return nil
+			}
 		}
 		r.sendAppend(m.From, false)
 

@@ -114,6 +114,7 @@ func (r *SchedulerTaskHandler) onHeartbeat(t *SchedulerRegionHeartbeatTask) {
 		PendingPeers:    t.PendingPeers,
 		ApproximateSize: uint64(size),
 	}
+	log.Infof("region send heartbeat to scheduler %+v", req)
 	r.SchedulerClient.RegionHeartbeat(req)
 }
 

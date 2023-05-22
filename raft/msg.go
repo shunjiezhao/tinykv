@@ -21,6 +21,7 @@ func (r *Raft) NewRespHeartbeatMsg(to uint64) pb.Message {
 	return pb.Message{
 		MsgType: pb.MessageType_MsgHeartbeatResponse,
 		To:      to,
+		Commit:  r.RaftLog.committed,
 	}
 }
 
@@ -64,6 +65,7 @@ func (r *Raft) NewAppendMsg(to uint64) pb.Message {
 			snapshot, err := storage.Snapshot()
 			if err != nil {
 				if errors.Is(err, ErrSnapshotTemporarilyUnavailable) {
+					log.Infof("%s send to %d {%d:%d} snapshot temporarily unavailable", r.Info(), to, pr.Next, r.RaftLog.LastIndex())
 					return r.NewHeartbeatMsg(to)
 				}
 				log.Panicf("%s send to %d {%d:%d} snapshot error %s", r.Info(), to, pr.Next, r.RaftLog.LastIndex(), err)
@@ -113,4 +115,26 @@ func (r *Raft) NewHupMsg() pb.Message {
 	return pb.Message{
 		MsgType: pb.MessageType_MsgHup,
 	}
+}
+func (r *Raft) SendSnapshot(to uint64) {
+	if r.State != StateLeader {
+		log.Panicf("you state %s not leader", r.Info())
+	}
+	storage := r.RaftLog.storage
+	pr := r.Prs[to]
+	snapshot, err := storage.Snapshot()
+	if err != nil {
+		if errors.Is(err, ErrSnapshotTemporarilyUnavailable) {
+			log.Infof("%s send to %d {%d:%d} snapshot temporarily unavailable", r.Info(), to, pr.Next, r.RaftLog.LastIndex())
+			r.send(r.NewAppendMsg(to))
+			return
+		}
+		log.Panicf("%s send to %d {%d:%d} snapshot error %s", r.Info(), to, pr.Next, r.RaftLog.LastIndex(), err)
+	}
+	log.Infof("%s send to %d snapshot", r.Info(), to)
+	r.send(pb.Message{
+		MsgType:  pb.MessageType_MsgSnapshot,
+		To:       to,
+		Snapshot: &snapshot,
+	})
 }

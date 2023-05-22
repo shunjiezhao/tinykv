@@ -227,7 +227,7 @@ func (r *Raft) resetPrs() {
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64, null bool) bool {
 	if r.Prs[to].Next > r.RaftLog.LastIndex() && null == false {
-		log.Debugf("next %d > last %d", r.Prs[to].Next, r.RaftLog.LastIndex())
+		log.Debugf("%d -> %d next %d > last %d", r.id, to, r.Prs[to].Next, r.RaftLog.LastIndex())
 		return false
 	}
 	r.send(r.NewAppendMsg(to))
@@ -328,13 +328,22 @@ func (r *Raft) becomeLeader() {
 	// 3. lead = me
 	r.Lead = r.id
 	r.leadTransferee = None
+	r.appendEmptyEntry()
+	log.Infof("%s became %s at term %d", r.Info(), r.State, r.Term)
+}
+
+func (r *Raft) AppendEmptyEntryAndBckst() {
+	r.appendEmptyEntry()
+	r.bcastAppend(false, false)
+}
+
+func (r *Raft) appendEmptyEntry() {
 	entry := &pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1, Data: nil}
 	r.leaderAppendEntries(entry)
 	if len(nodes(r)) == 1 {
 		log.Infof("single node")
 		r.updateCommit()
 	}
-	log.Infof("%s became %s at term %d", r.Info(), r.State, r.Term)
 }
 
 // updateCommit update and return commit index
