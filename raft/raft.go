@@ -418,6 +418,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	var reject = false
 	var index uint64 = 0
 	var myCommit uint64
+	//var term uint64
 
 	// is prevLog Index
 	prevLog, err := r.RaftLog.entryAt(m.Index)
@@ -433,7 +434,12 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	if prevLog.Term != m.LogTerm {
 		// conflict
 		reject = true
-		//todo(performance)
+		////todo(performance)
+		//index = min(m.Index, r.RaftLog.LastIndex())
+		//index = r.findConflict(index, m.LogTerm)
+		//if log, err := r.RaftLog.entryAt(index); err == nil {
+		//	term = log.Term
+		//}
 		goto send
 	}
 
@@ -453,6 +459,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	log.Debugf("%s commit %d NewIndex: %d LeaderCommit: %d", r.Info(), r.RaftLog.committed, index, m.Commit)
 send:
 	msg := r.NewRespAppendMsg(m.From, index, reject)
+	//msg.LogTerm = term
 	r.send(msg)
 	log.Debugf("%s send append response to %x %s", r.Info(), m.From, MessageStr(r, msg))
 }
@@ -474,31 +481,33 @@ func (r *Raft) handleProse(m pb.Message) {
 	if m.Entries == nil {
 		log.Panicf("recv prose is nil")
 	}
-	var confChangeIndex []uint64
+	r.leaderAppendEntries(m.Entries...)
+	cnt := 0
 	for _, entry := range m.Entries {
 		if entry.EntryType == pb.EntryType_EntryConfChange {
-			confChangeIndex = append(confChangeIndex, entry.Index)
+			r.PendingConfIndex = entry.Index
+			cnt++
 		}
 	}
-
-	if len(confChangeIndex) > 1 {
-		log.Panicf("don't propose 2 conf change in one propose")
+	if cnt > 1 {
+		panic("")
 	}
-	if len(confChangeIndex) == 1 {
-		if r.RaftLog.applied >= r.PendingConfIndex {
-			log.Infof("%s apply conf change", r.Info())
-			r.PendingConfIndex = confChangeIndex[0]
-		} else {
-			log.Infof("%s previous change is not applied", r.Info())
-			return
-		}
-	}
-
-	r.leaderAppendEntries(m.Entries...)
 	if len(nodes(r)) == 1 {
 		r.updateCommit()
 	}
 }
+
+func (r *Raft) CanChangeConf() bool {
+	if r.RaftLog.applied >= r.PendingConfIndex {
+		log.Infof("%s apply conf change", r.Info())
+	} else {
+		log.Infof("%s previous change is not applied", r.Info())
+		return false
+	}
+	return true
+}
+
+// handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleSnapshot(m pb.Message) {
 	log.Info("handleSnapshot")
 	// Your Code Here (2C).
@@ -542,6 +551,7 @@ func (r *Raft) addNode(id uint64) {
 	if _, ok := r.Prs[id]; ok {
 		return
 	}
+	r.peers = append(r.peers, id)
 	r.Prs[id] = &Progress{
 		Match: 0,
 		Next:  r.RaftLog.LastIndex() + 1,
@@ -554,7 +564,10 @@ func (r *Raft) removeNode(id uint64) {
 	delete(r.Prs, id)
 	if r.State == StateLeader {
 		// update commit
-		r.updateCommit()
+		old := r.RaftLog.committed
+		if old < r.updateCommit() {
+			r.bcastAppend(false, true)
+		}
 	}
 
 }
@@ -631,14 +644,17 @@ func (r *Raft) Alive() bool {
 	return false
 }
 
+// func (r *Raft) findConflict(index, term uint64) uint64 {
+//
+//		for {
+//			prevLog, err := r.RaftLog.entryAt(index)
+//			if err != nil || prevLog.Term <= term {
+//				break
+//			}
+//			index--
+//		}
+//		return index
+//	}
 func (r *Raft) ID() uint64 {
 	return r.id
-}
-
-func (r *Raft) CanChangeConf() bool {
-	return r.PendingConfIndex <= r.RaftLog.applied
-}
-
-func (r *Raft) SetConfIndex(index uint64) {
-	r.PendingConfIndex = index
 }

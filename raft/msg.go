@@ -66,7 +66,13 @@ func (r *Raft) NewAppendMsg(to uint64) pb.Message {
 			if err != nil {
 				if errors.Is(err, ErrSnapshotTemporarilyUnavailable) {
 					log.Infof("%s send to %d {%d:%d} snapshot temporarily unavailable", r.Info(), to, pr.Next, r.RaftLog.LastIndex())
-					return r.NewHeartbeatMsg(to)
+					return pb.Message{
+						MsgType: pb.MessageType_MsgAppend,
+						To:      to,
+						LogTerm: r.RaftLog.LastTerm(),
+						Index:   r.RaftLog.LastIndex(),
+						Commit:  r.RaftLog.committed,
+					}
 				}
 				log.Panicf("%s send to %d {%d:%d} snapshot error %s", r.Info(), to, pr.Next, r.RaftLog.LastIndex(), err)
 			}

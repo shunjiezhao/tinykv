@@ -116,6 +116,9 @@ func stepCandidate(r *Raft, m pb.Message) error {
 	case pb.MessageType_MsgRequestVoteResponse:
 		gr, rj, res := r.poll(m.From, m.MsgType, !m.Reject) //Reject = true stand not vote
 		log.Infof("%s has received %s %d votes and %d vote rejections result: %v", r.Info(), MessageStr(r, m), gr, rj, res)
+		if len(r.Prs) == 0 {
+			panic("")
+		}
 
 		switch res {
 		case VoteWon:
@@ -161,6 +164,11 @@ func stepLeader(r *Raft, m pb.Message) error {
 				r.heartbeatElapsed = 0 // reset heartbeatElapsed
 			}
 		} else {
+			//index := uint64(0)
+			//if m.LogTerm > 0 {
+			//	index = r.findConflict(m.Index, m.LogTerm)
+			//}
+			//pr.Next = min(index, pr.Next-Next1)
 			pr.Next--
 			log.Infof("rejectLog")
 			if pr.Next < r.RaftLog.First() {

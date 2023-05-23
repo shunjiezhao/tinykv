@@ -346,10 +346,10 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	ps.applyState.TruncatedState.Index = metaData.Index
 	ps.applyState.TruncatedState.Term = metaData.Term
 
-	ps.region = snapData.Region
-	resp.Region = ps.region
-
-	mustNil(kvWB.SetMeta(meta.RegionStateKey(ps.region.Id), ps.region))
+	//ps.region = snapData.Region
+	//resp.Region =ps.region
+	//meta.WriteRegionState(kvWB, ps.region, rspb.PeerState_Normal)
+	resp.Region = snapData.Region
 	mustNil(kvWB.SetMeta(meta.ApplyStateKey(ps.region.Id), ps.applyState))
 	mustNil(raftWB.SetMeta(meta.RaftStateKey(ps.region.Id), ps.raftState)) // raft state
 

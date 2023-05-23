@@ -57,27 +57,34 @@ func (d *peerMsgHandler) HandleRaftReady() {
 
 	// Your Code Here (2B).
 	ready := d.RaftGroup.Ready()
-	if raft.IsEmptySnap(&ready.Snapshot) == false {
-		log.Infof("can't handle snapshot")
-	}
-
 	regionState, err := d.peer.peerStorage.SaveReadyState(&ready)
 	updateMeta := func(shouldNotify bool) {
 		meta := d.ctx.storeMeta
 		meta.Lock()
 		meta.regionRanges.ReplaceOrInsert(&regionItem{region: d.Region()})
-		meta.regions[d.regionId] = d.Region()
+		meta.regions[d.Region().Id] = d.Region()
 		meta.Unlock()
 		if shouldNotify {
-			d.notifyHeartbeatScheduler(d.Region(), d.peer)
+			d.HeartbeatScheduler(d.ctx.schedulerTaskSender)
 		}
 	}
+	getRegionMarshalData := func(region *metapb.Region) []byte {
+		// set new region
+		state := new(rspb.RegionLocalState)
+		state.State = rspb.PeerState_Normal
+		state.Region = region
+		data, err := state.Marshal()
+		mustNil(err)
+		return data
+	}
+
 	mustNil(err)
 	if regionState != nil {
-		if d.Region() != regionState.Region {
-			panic("")
-		}
-		updateMeta(false)
+		d.SetRegion(regionState.Region)
+		updateMeta(true)
+		mustNil(d.peerStorage.Engines.Kv.Update(func(txn *badger.Txn) error {
+			return txn.Set(meta.RegionStateKey(d.Region().Id), getRegionMarshalData(d.Region()))
+		}))
 	}
 
 	d.Send(d.ctx.trans, ready.Messages)
@@ -87,21 +94,19 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	if len(ready.CommittedEntries) > 0 {
 		addNode := util.InvalidID
 		db := d.peerStorage.Engines.Kv
-		removeSelf := false
 		var entry []*pb.Entry
 		var modify bool
 		if err := db.Update(func(txn *badger.Txn) error {
 			for _, en := range ready.CommittedEntries {
-				if d.stopped {
-					return nil
+				if d.stopped { // for debug
+					panic("")
 				}
 				entry = append(entry, &en)
 				if en.EntryType == pb.EntryType_EntryConfChange {
 					if modify { // for debug
-						panic("")
+						log.Warnf("modify twice") // this is follow apply log may be modify twice, so we should ignore it
 					}
 
-					modify = true
 					var cc pb.ConfChange
 					mustNil(cc.Unmarshal(en.Data))
 
@@ -124,29 +129,21 @@ func (d *peerMsgHandler) HandleRaftReady() {
 						log.Infof("%d insert peer %d", d.PeerId(), cc.NodeId)
 						addNode = cc.NodeId
 					} else if cc.ChangeType == pb.ConfChangeType_RemoveNode && index != -1 {
-						removeSelf = cc.NodeId == d.PeerId()
+						if cc.NodeId == d.PeerId() {
+							d.tryToDestroy() // corner case: https://asktug.com/t/topic/274196/5?replies_to_post_number=2
+							return nil
+						}
 						region.Peers = append(region.Peers[:index], region.Peers[index+1:]...)
 						log.Infof("%d remove peer index: %d", d.PeerId(), cc.NodeId)
 						d.removePeerCache(cc.NodeId)
 					}
-					log.Infof("%d %d %+v", d.peer.PeerId(), region.RegionEpoch.ConfVer, region.Peers)
-					updateMeta(true)
+					modify = true // if remove self not update region data
+					log.Infof("RegionInfo : {peerID: %d}  {ConfVer: %d} {Peers: %+v}", d.peer.PeerId(), region.RegionEpoch.ConfVer, region.Peers)
 
 					// set new region
-					state := new(rspb.RegionLocalState)
-
-					state.State = rspb.PeerState_Normal
-					if removeSelf {
-						state.State = rspb.PeerState_Tombstone
-					}
-					state.Region = region
-					data, _ := state.Marshal()
-					mustNil(txn.Set(meta.RegionStateKey(region.Id), data))
-					if removeSelf {
-						d.destroyPeer()
-						return nil
-					} else if addNode != util.InvalidID && d.RaftGroup.Raft.State == raft.StateLeader {
-						d.RaftGroup.Raft.AppendEmptyEntryAndBckst()
+					mustNil(txn.Set(meta.RegionStateKey(region.Id), getRegionMarshalData(region)))
+					if addNode != util.InvalidID && d.RaftGroup.Raft.State == raft.StateLeader {
+						d.RaftGroup.Raft.AppendEmptyEntryAndBckst() // if add node we should append empty entry to let new node catch up log
 					}
 				} else {
 					request := raft_cmdpb.RaftCmdRequest{}
@@ -161,6 +158,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 					}
 				}
 			}
+			updateMeta(modify)
 
 			d.peerStorage.applyState.AppliedIndex = max(d.peerStorage.AppliedIndex(), ready.CommittedEntries[len(ready.CommittedEntries)-1].Index)
 			marshal, err := proto.Marshal(d.peerStorage.applyState)
@@ -198,9 +196,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 
 	d.RaftGroup.Advance(ready)
 }
-func (d *peerMsgHandler) notifyHeartbeatScheduler(region *metapb.Region, peer *peer) {
-	d.HeartbeatScheduler(d.ctx.schedulerTaskSender)
-}
+
 func (d *peerMsgHandler) handlePro(entry *pb.Entry) *proposal {
 	if entry == nil {
 		log.Panicf("entry is nil")
@@ -276,18 +272,6 @@ func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest) *raft_cmdp
 		d.RaftGroup.TransferLeader(req.TransferLeader.Peer.Id)
 		return resp
 	case raft_cmdpb.AdminCmdType_ChangePeer:
-		change := req.ChangePeer
-		log.Infof("%+v", change)
-		if d.RaftGroup.Raft.CanChangeConf() {
-			d.RaftGroup.Raft.SetConfIndex(d.RaftGroup.Raft.RaftLog.NextIndex())
-			if err := d.RaftGroup.ProposeConfChange(pb.ConfChange{
-				ChangeType: change.ChangeType,
-				NodeId:     change.Peer.Id,
-				StoreId:    change.Peer.StoreId,
-			}); err != nil {
-				log.Panicf("propose conf change error %v", err)
-			}
-		}
 
 	default:
 		log.Panicf("unknown admin cmd type %v", req.CmdType)
@@ -422,6 +406,31 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 	pro.term = d.Term()
 	pro.index = d.nextProposalIndex()
 	for {
+		if msg.AdminRequest != nil &&
+			msg.AdminRequest.ChangePeer != nil {
+			change := msg.AdminRequest.ChangePeer
+			log.Infof("%+v", change)
+			if d.RaftGroup.Raft.CanChangeConf() {
+				if err := d.RaftGroup.ProposeConfChange(pb.ConfChange{
+					ChangeType: change.ChangeType,
+					NodeId:     change.Peer.Id,
+					StoreId:    change.Peer.StoreId,
+				}); err != nil {
+					log.Panicf("propose conf change error %v", err)
+				}
+			} else {
+
+				cb.Done(&raft_cmdpb.RaftCmdResponse{
+					Header: &raft_cmdpb.RaftResponseHeader{
+						Error: &errorpb.Error{
+							Message: errors.New("wait").Error(),
+						},
+					},
+				})
+				return
+			}
+
+		}
 		err := d.peer.RaftGroup.Propose(data)
 		if err == nil {
 			break
@@ -686,6 +695,9 @@ func (d *peerMsgHandler) checkSnapshot(msg *rspb.RaftMessage) (*snap.SnapKey, er
 		return nil, err
 	}
 	return nil, nil
+}
+func (d *peerMsgHandler) tryToDestroy() {
+	d.destroyPeer()
 }
 
 func (d *peerMsgHandler) destroyPeer() {
