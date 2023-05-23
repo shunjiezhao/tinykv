@@ -69,7 +69,6 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		}
 	}
 	getRegionMarshalData := func(region *metapb.Region) []byte {
-		// set new region
 		state := new(rspb.RegionLocalState)
 		state.State = rspb.PeerState_Normal
 		state.Region = region
@@ -101,6 +100,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 				if d.stopped { // for debug
 					panic("")
 				}
+
 				entry = append(entry, &en)
 				if en.EntryType == pb.EntryType_EntryConfChange {
 					if modify { // for debug
@@ -150,7 +150,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 					mustNil(request.Unmarshal(en.Data))
 					log.Debugf("handle raft ready %+v", request)
 					if request.AdminRequest != nil {
-						adminResp[&en] = d.handleAdminReq(request.AdminRequest)
+						adminResp[&en], _ = d.handleAdminReq(request.AdminRequest)
 					} else if len(request.Requests) > 0 {
 						resp[&en] = d.handleReq(&request, txn)
 					} else {
@@ -172,7 +172,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		for _, en := range entry {
 			if pro := d.handlePro(en); pro != nil && pro.cb != nil {
 				if cmdResponse, ok := resp[en]; ok {
-					log.Infof("proposals %+v %+v", pro, cmdResponse)
+					log.Infof("cmd-proposals %+v %+v", pro, cmdResponse)
 					if resp[en].CmdType == raft_cmdpb.CmdType_Snap {
 						pro.cb.Txn = d.peerStorage.Engines.Kv.NewTransaction(false)
 					}
@@ -180,12 +180,11 @@ func (d *peerMsgHandler) HandleRaftReady() {
 						Header:    &raft_cmdpb.RaftResponseHeader{CurrentTerm: d.Term()},
 						Responses: []*raft_cmdpb.Response{cmdResponse},
 					})
-					log.Debug("proposals done", pro)
 				} else if adminResponse, ok := adminResp[en]; ok {
-					log.Infof("proposals %+v %+v", pro, adminResponse)
+					log.Infof("admin-proposals %+v %+v", pro, adminResponse)
 					pro.cb.Done(adminResponse)
-					log.Debug("proposals done", pro)
 				}
+				log.Debug("proposals done", pro)
 			}
 		}
 		if addNode != util.InvalidID && d.RaftGroup.Raft.State == raft.StateLeader {
@@ -232,10 +231,10 @@ func (d *peerMsgHandler) handlePro(entry *pb.Entry) *proposal {
 	}
 	return nil
 }
-func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest) *raft_cmdpb.RaftCmdResponse {
+func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest) (*raft_cmdpb.RaftCmdResponse, bool /*if true that stand split success so deny other req*/) {
 	if req == nil {
 		log.Panicf("req is nil")
-		return nil
+		return nil, false
 	}
 	buildNotLeaderErr := func() *errorpb.Error {
 		return &errorpb.Error{
@@ -253,30 +252,41 @@ func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest) *raft_cmdp
 	}
 	if d.RaftGroup.Raft.State != raft.StateLeader && req.CmdType != raft_cmdpb.AdminCmdType_CompactLog {
 		resp.Header.Error = buildNotLeaderErr()
-		return resp
+		return resp, false
 	}
 	switch req.CmdType {
 	case raft_cmdpb.AdminCmdType_CompactLog:
 		index, term := req.GetCompactLog().GetCompactIndex(), req.GetCompactLog().GetCompactTerm()
 		if index < d.RaftGroup.Raft.RaftLog.First() {
 			log.Warn("compact index less than first index")
-			return resp
+			return resp, false
 		}
 		d.peerStorage.applyState.TruncatedState = &rspb.RaftTruncatedState{
 			Index: index,
 			Term:  term,
 		}
 		d.ScheduleCompactLog(index)
-		return resp
+		return resp, false
 	case raft_cmdpb.AdminCmdType_TransferLeader:
 		d.RaftGroup.TransferLeader(req.TransferLeader.Peer.Id)
-		return resp
+		return resp, false
 	case raft_cmdpb.AdminCmdType_ChangePeer:
-
+	case raft_cmdpb.AdminCmdType_Split:
+		// split
+		// 1. clone region
+		// 2. check peer len is equal
+		// 2.2 end key
+		// 3. add version
+		// 4. set state to new region ( endkey, peer,id , regionEpoch, startkey)
+		// 4.1 duration info
+		// 5. create peer
+		// 6. set global state
+		// 7. send heartbeat
+		return resp, true
 	default:
 		log.Panicf("unknown admin cmd type %v", req.CmdType)
 	}
-	return resp
+	return resp, false
 
 }
 
@@ -285,13 +295,16 @@ func (d *peerMsgHandler) handleReq(request *raft_cmdpb.RaftCmdRequest, txn *badg
 		log.Panicf("len(request.Requests) != 1 %d", len(request.Requests))
 	}
 
+	// check key is in region range
+	//util.CheckKeyInRegion()
+
 	req := request.Requests[0]
 	var res raft_cmdpb.Response
 	res.CmdType = req.CmdType
 	switch req.CmdType {
 	case raft_cmdpb.CmdType_Get:
-		val, err := txn.Get(engine_util.KeyWithCF(req.Get.Cf, req.Get.Key))
 		log.Infof("%s get %s %s", d.RaftGroup.Raft.Info(), req.Get.Cf, req.Get.Key)
+		val, err := txn.Get(engine_util.KeyWithCF(req.Get.Cf, req.Get.Key))
 		mustNil(err)
 		value, err := val.Value()
 		mustNil(err)
