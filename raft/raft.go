@@ -501,7 +501,7 @@ func (r *Raft) CanChangeConf() bool {
 	if r.RaftLog.applied >= r.PendingConfIndex {
 		log.Infof("%s apply conf change", r.Info())
 	} else {
-		log.Infof("%s previous change is not applied", r.Info())
+		log.Warnf("%s previous change is not applied { applied: %d } { pendingConfIndex: %d }", r.Info(), r.RaftLog.applied, r.PendingConfIndex)
 		return false
 	}
 	return true

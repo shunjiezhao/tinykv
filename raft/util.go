@@ -192,7 +192,7 @@ func MessageStr(r *Raft, m pb.Message) string {
 }
 
 func (r *Raft) Info() string {
-	return fmt.Sprintf("{%x:%s:%d} ", r.id, r.State, r.Term)
+	return fmt.Sprintf("{%d:%s:%d:%+v:%+v} ", r.id, r.State, r.Term, r.peers, nodes(r))
 }
 func mustBeNil(err error) {
 	if err != nil {
