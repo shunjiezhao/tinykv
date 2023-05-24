@@ -77,6 +77,6 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operator {
 	// Your Code Here (3C).
-
+	panic("")
 	return nil
 }

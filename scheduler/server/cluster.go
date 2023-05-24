@@ -279,6 +279,51 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *schedulerpb.StoreStats) error 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Your Code Here (3C).
+	var (
+		prevConf, newConf *metapb.RegionEpoch
+	)
+	newConf = region.GetRegionEpoch()
+	// 1. check region exist  ( not  true)
+	prev := c.GetRegion(region.GetID())
+
+	if prev == nil && newConf != nil {
+		regions := c.ScanRegions(region.GetStartKey(), region.GetEndKey(), 100)
+		for _, r := range regions {
+			if r == nil || r.GetRegionEpoch() == nil {
+				continue
+			}
+			prevConf = r.GetRegionEpoch()
+			if prevConf == nil || newConf == nil {
+				log.Info("region heartbeat ignored")
+			}
+			if prevConf.Version > newConf.Version && prevConf.ConfVer > newConf.ConfVer {
+				return errors.New("region heartbeat ignored")
+			}
+		}
+		goto update
+	}
+	if prev != nil {
+		// 2. compare confVer and version
+		prevConf = prev.GetRegionEpoch()
+		if (prevConf != nil && newConf != nil) && (prevConf.Version > newConf.Version || prevConf.ConfVer > newConf.ConfVer) {
+			return errors.New("region heartbeat ignored")
+		}
+	}
+
+	// do compare
+	// region tree 和存储状态。你可以使用 RaftCluster.core.PutRegion 来更新 region-tree ，并使用 RaftCluster.core.UpdateStoreStatus 来更新相关存储的状态（如领导者数量、区域数量、待处理的同伴数量…）。
+update:
+	c.core.PutRegion(region)
+	// region.GetStoreIds()
+	var storeIds []uint64
+	for id := range region.GetStoreIds() {
+		storeIds = append(storeIds, id)
+	}
+	for _, id := range storeIds {
+		//func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+		//c.core.UpdateStoreStatus(id, c.core.GetStoreLeaderCount(id), c.core.GetStoreRegionCount(id), c.core.GetStorePendingPeerCount(id), c.core.GetStoreLeaderRegionSize(id), c.core.GetStoreRegionSize(id))
+		c.updateStoreStatusLocked(id)
+	}
 
 	return nil
 }
