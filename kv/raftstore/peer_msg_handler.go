@@ -91,14 +91,6 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			d.HeartbeatScheduler(d.ctx.schedulerTaskSender)
 		}
 	}
-	getRegionMarshalData := func(region *metapb.Region) []byte {
-		state := new(rspb.RegionLocalState)
-		state.State = rspb.PeerState_Normal
-		state.Region = region
-		data, err := state.Marshal()
-		mustNil(err)
-		return data
-	}
 
 	mustNil(err)
 	if regionState != nil {
@@ -126,10 +118,6 @@ func (d *peerMsgHandler) HandleRaftReady() {
 
 				entry = append(entry, &en)
 				if en.EntryType == pb.EntryType_EntryConfChange {
-					if modify { // for debug
-						log.Warnf("modify twice") // this is follow apply log may be modify twice, so we should ignore it
-					}
-
 					var cc pb.ConfChange
 					mustNil(cc.Unmarshal(en.Data))
 
@@ -145,6 +133,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 							break
 						}
 					}
+
 					if cc.ChangeType == pb.ConfChangeType_AddNode && index == -1 {
 						pe := &metapb.Peer{Id: cc.NodeId, StoreId: cc.StoreId}
 						region.Peers = append(region.Peers, pe)
@@ -173,7 +162,8 @@ func (d *peerMsgHandler) HandleRaftReady() {
 					mustNil(request.Unmarshal(en.Data))
 
 					log.Debugf("handle raft ready %+v", request)
-					if request.AdminRequest != nil {
+					switch {
+					case request.AdminRequest != nil:
 						if request.Header != nil && request.Header.RegionEpoch != nil && util.IsEpochStale(request.Header.RegionEpoch, d.Region().RegionEpoch) {
 							log.Infof("stale epoch %d %d", request.Header.RegionEpoch.Version, d.Region().RegionEpoch.Version)
 							ans := ErrRespStaleCommand(d.Term())
@@ -181,11 +171,9 @@ func (d *peerMsgHandler) HandleRaftReady() {
 							adminResp[&en] = ans
 							continue
 						}
-						adminResp[&en], _ = d.handleAdminReq(request.AdminRequest, txn)
-					} else if len(request.Requests) > 0 {
+						adminResp[&en] = d.handleAdminReq(request.AdminRequest, txn)
+					case len(request.Requests) > 0:
 						resp[&en] = d.handleReq(&request, txn)
-					} else {
-						log.Debug("empty log")
 					}
 				}
 			}
@@ -259,49 +247,37 @@ func (d *peerMsgHandler) handlePro(entry *pb.Entry) *proposal {
 	}
 	return nil
 }
-func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, txn *badger.Txn) (*raft_cmdpb.RaftCmdResponse, bool) {
+func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, txn *badger.Txn) *raft_cmdpb.RaftCmdResponse {
 	if req == nil {
 		log.Panicf("req is nil")
-		return nil, false
+		return nil
 	}
 
-	buildNotLeaderErr := func() *errorpb.Error {
-		log.Infof("build leader err %d", d.regionId)
-		return &errorpb.Error{
-			NotLeader: &errorpb.NotLeader{
-				RegionId: d.regionId,
-				Leader:   &metapb.Peer{Id: d.RaftGroup.Raft.Lead},
-			},
-		}
-	}
 	var resp = &raft_cmdpb.RaftCmdResponse{
 		Header: &raft_cmdpb.RaftResponseHeader{CurrentTerm: d.Term()},
 		AdminResponse: &raft_cmdpb.AdminResponse{
 			CmdType: req.CmdType,
 		},
 	}
-	if d.RaftGroup.Raft.State != raft.StateLeader && req.CmdType != raft_cmdpb.AdminCmdType_CompactLog && req.CmdType != raft_cmdpb.AdminCmdType_Split {
-		resp.Header.Error = buildNotLeaderErr()
-		return resp, false
-	}
+
 	switch req.CmdType {
 	case raft_cmdpb.AdminCmdType_CompactLog:
 		index, term := req.GetCompactLog().GetCompactIndex(), req.GetCompactLog().GetCompactTerm()
 		if index < d.RaftGroup.Raft.RaftLog.First() {
 			log.Warn("compact index less than first index")
-			return resp, false
+			return resp
 		}
 		d.peerStorage.applyState.TruncatedState = &rspb.RaftTruncatedState{
 			Index: index,
 			Term:  term,
 		}
 		d.ScheduleCompactLog(index)
-		return resp, false
+		return resp
 	case raft_cmdpb.AdminCmdType_TransferLeader:
 		d.RaftGroup.TransferLeader(req.TransferLeader.Peer.Id)
 		resp.AdminResponse.CmdType = raft_cmdpb.AdminCmdType_TransferLeader
 		resp.AdminResponse.TransferLeader = &raft_cmdpb.TransferLeaderResponse{}
-		return resp, false
+		return resp
 	case raft_cmdpb.AdminCmdType_ChangePeer:
 
 	case raft_cmdpb.AdminCmdType_Split:
@@ -314,13 +290,13 @@ func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, txn *badge
 		// 2. check peer len is equal
 		if len(oldRegion.Peers) != len(req.Split.NewPeerIds) {
 			log.Warnf("peer len is not equal %d %d", len(oldRegion.Peers), len(req.Split.NewPeerIds))
-			return ErrRespStaleCommand(d.Term()), false
+			return ErrRespStaleCommand(d.Term())
 		}
 		// 2.2 end key
 
 		if engine_util.ExceedEndKey(oldRegion.EndKey, req.Split.SplitKey) {
 			resp.Header.Error = d.buildKeyNotInRegionErr(req.Split.SplitKey)
-			return resp, false
+			return resp
 		}
 		// for debug
 		if util.CheckKeyInRegion(req.Split.SplitKey, d.Region()) != nil {
@@ -355,11 +331,11 @@ func (d *peerMsgHandler) handleAdminReq(req *raft_cmdpb.AdminRequest, txn *badge
 		d.notifyHeartbeatScheduler(oldRegion, d.peer)
 		d.notifyHeartbeatScheduler(newRegion, p)
 
-		return resp, true
+		return resp
 	default:
 		log.Panicf("unknown admin cmd type %v", req.CmdType)
 	}
-	return resp, false
+	return resp
 
 }
 
@@ -832,7 +808,7 @@ func (d *peerMsgHandler) tryToDestroy() {
 		msg.From = d.PeerId()
 		msg.Term = d.Term()
 		m := []pb.Message{}
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 10; i++ {
 			d.Send(d.ctx.trans, m)
 			time.Sleep(50 * time.Millisecond)
 		}
