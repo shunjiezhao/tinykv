@@ -54,11 +54,18 @@ func (txn *MvccTxn) PutWrite(key []byte, ts uint64, write *Write) {
 	})
 }
 
+/*
+           LockKey
+┌───────────┬───────────────┐
+│  CfLock   │  Key          │
+└───────────┴───────────────┘
+*/
+
 // GetLock returns a lock if key is locked. It will return (nil, nil) if there is no lock on key, and (nil, err)
 // if an error occurs during lookup.
 func (txn *MvccTxn) GetLock(key []byte) (*Lock, error) {
 	// Your Code Here (4A).
-	data, err := txn.Reader.GetCF(engine_util.CfLock, key)
+	data, err := txn.Reader.GetCF(engine_util.CfLock, key) // lock key
 	if err != nil {
 		log.Error("get lock error", err)
 		return nil, err
@@ -98,21 +105,34 @@ func (txn *MvccTxn) DeleteLock(key []byte) {
 	})
 }
 
+/*
+
+	          WriteKey
+┌───────────┬─────────────────┐
+│  CfWrite  │  Encode(key,ts) │
+└───────────┴─────────────────┘
+
+
+           DefaultKey
+┌────────────┬────────────────────┐
+│  CfDefault │  Encode(key,ts)    │
+└────────────┴────────────────────┘
+*/
 // GetValue finds the value for key, valid at the start timestamp of this transaction.
 // I.e., the most recent value committed before the start of this transaction.
 func (txn *MvccTxn) GetValue(key []byte) ([]byte, error) {
 	// Your Code Here (4A).
 	iter := txn.Reader.IterCF(engine_util.CfWrite)
 	defer iter.Close()
-	for iter.Seek(EncodeKey(key, txn.StartTS)); iter.Valid(); {
+	for iter.Seek(EncodeKey(key, txn.StartTS)); iter.Valid(); { // 离 startts 最新的
 		item := iter.Item()
 		value, err := item.ValueCopy(nil)
 		if err != nil {
 			log.Error("get value error", err)
 			return nil, err
 		}
-		userKey := DecodeUserKey(item.Key())
-		if !bytes.Equal(userKey, key) { // compare key
+		userKey := DecodeUserKey(item.Key()) //  origin key
+		if !bytes.Equal(userKey, key) {      // compare key
 			log.Info("key is not equal")
 			return nil, nil
 		}
@@ -128,7 +148,7 @@ func (txn *MvccTxn) GetValue(key []byte) ([]byte, error) {
 			return nil, nil
 		}
 
-		cf, err := txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(key, write.StartTS))
+		cf, err := txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(key, write.StartTS)) // default key
 		if err != nil {
 			log.Error("get cf error", err)
 			return nil, err
@@ -172,26 +192,26 @@ func (txn *MvccTxn) CurrentWrite(key []byte) (*Write, uint64, error) {
 	// Your Code Here (4A).
 	iter := txn.Reader.IterCF(engine_util.CfWrite)
 	defer iter.Close()
-	for iter.Seek(EncodeKey(key, math.MaxUint64)); iter.Valid(); iter.Next() {
+	for iter.Seek(EncodeKey(key, math.MaxUint64)); iter.Valid(); iter.Next() { // last
 		item := iter.Item()
 		value, err := item.ValueCopy(nil)
 		if err != nil {
 			log.Error("get value error", err)
 			return nil, 0, err
 		}
-		userKey := DecodeUserKey(item.KeyCopy(nil))
-		if !bytes.Equal(userKey, key) { // compare key
+		userKey := DecodeUserKey(item.KeyCopy(nil)) // origin key
+		if !bytes.Equal(userKey, key) {             // compare key
 			log.Info("key is not equal")
 			return nil, 0, err
 		}
 
-		write, err := ParseWrite(value)
+		write, err := ParseWrite(value) // parse write
 		if err != nil {
 			log.Error("parse write error", err)
 			return nil, 0, err
 		}
-		if write.StartTS == txn.StartTS {
-			return write, decodeTimestamp(item.KeyCopy(nil)), nil
+		if write.StartTS == txn.StartTS { // item.key = encode(key, commitTs)
+			return write, decodeTimestamp(item.KeyCopy(nil)), nil // return write and commit ts
 		}
 	}
 
@@ -202,9 +222,9 @@ func (txn *MvccTxn) CurrentWrite(key []byte) (*Write, uint64, error) {
 // write's commit timestamp, or an error.
 func (txn *MvccTxn) MostRecentWrite(key []byte) (*Write, uint64, error) {
 	// Your Code Here (4A).
-	iter := txn.Reader.IterCF(engine_util.CfWrite)
+	iter := txn.Reader.IterCF(engine_util.CfWrite) // get write column
 	defer iter.Close()
-	for iter.Seek(EncodeKey(key, math.MaxUint64)); iter.Valid(); {
+	for iter.Seek(EncodeKey(key, math.MaxUint64)); iter.Valid(); { // last
 		item := iter.Item()
 		value, err := item.ValueCopy(nil)
 		if err != nil {
