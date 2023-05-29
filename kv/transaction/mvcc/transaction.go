@@ -84,12 +84,16 @@ func (txn *MvccTxn) GetLock(key []byte) (*Lock, error) {
 
 // PutLock adds a key/lock to this transaction.
 func (txn *MvccTxn) PutLock(key []byte, lock *Lock) {
-	// Your Code Here (4A).
+	var b []byte
+	if lock != nil {
+		b = lock.ToBytes()
+	}
+
 	txn.writes = append(txn.writes, storage.Modify{
 		Data: storage.Put{
 			Key:   key,
 			Cf:    engine_util.CfLock,
-			Value: lock.ToBytes(),
+			Value: b,
 		},
 	})
 }
@@ -113,7 +117,7 @@ func (txn *MvccTxn) DeleteLock(key []byte) {
 └───────────┴─────────────────┘
 
 
-           DefaultKey
+	DefaultKey
 ┌────────────┬────────────────────┐
 │  CfDefault │  Encode(key,ts)    │
 └────────────┴────────────────────┘
